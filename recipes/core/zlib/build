@@ -1,0 +1,3 @@
+cd "$WAV_SRC"/zlib-*
+./configure --prefix="$WAV_SYSROOT" --static
+make -j"$WAV_JOBS"

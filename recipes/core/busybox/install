@@ -1,0 +1,2 @@
+cd "$WAV_SRC"/busybox-*
+make CONFIG_PREFIX="$WAV_SYSROOT" install

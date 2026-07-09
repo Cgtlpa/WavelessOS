@@ -1,0 +1,13 @@
+name=example
+version=1.0
+source=https://example.com/example-1.0.tar.gz
+
+# env vars available in build/install scripts:
+#   WAV_PKG       - package name
+#   WAV_VERSION   - package version
+#   WAV_SYSROOT   - install prefix
+#   WAV_CACHE     - download cache dir
+#   WAV_TMP       - temp build dir
+#   WAV_JOBS      - parallel jobs
+#   WAV_SRC       - where source is extracted
+#   WAV_BUILD_DIR - build directory

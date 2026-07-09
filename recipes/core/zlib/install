@@ -1,0 +1,2 @@
+cd "$WAV_SRC"/zlib-*
+make install

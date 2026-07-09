@@ -1,0 +1,3 @@
+cd "$WAV_SRC"/busybox-*
+cp "$(dirname "$0")/config" .config 2>/dev/null || make defconfig
+make -j"$WAV_JOBS" CC=gcc
