@@ -1,0 +1,9 @@
+cd "$WAV_SRC"
+
+if [ -f "$WAV_SYSROOT/usr/src/linux-zen/.config" ]; then
+	cp "$WAV_SYSROOT/usr/src/linux-zen/.config" .config
+else
+	make zen_defconfig
+fi
+
+make -j"$WAV_JOBS"

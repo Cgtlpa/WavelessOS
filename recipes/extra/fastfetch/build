@@ -1,0 +1,9 @@
+mkdir -p "$WAV_BUILD_DIR"/build
+cd "$WAV_BUILD_DIR"/build
+
+cmake "$WAV_SRC" \
+	-DCMAKE_INSTALL_PREFIX=/usr \
+	-DCMAKE_BUILD_TYPE=Release \
+	-DENABLE_SYSTEM_YYJSON=OFF
+
+make -j"$WAV_JOBS"

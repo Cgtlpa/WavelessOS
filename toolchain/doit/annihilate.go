@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bufio"
 	"os"
 	"strings"
-	"fmt"
 )
 
 func annihilate(pkg string) {
@@ -31,24 +29,7 @@ func annihilate(pkg string) {
 	}
 
 	os.Remove(dbFile)
-
-	links := sysroot() + "/.wav/links/" + pkg
-	if data, err := os.ReadFile(links); err == nil {
-		scanner := bufio.NewScanner(strings.NewReader(string(data)))
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line == "" {
-				continue
-			}
-			parts := strings.Fields(line)
-			if len(parts) == 2 {
-				os.Remove(sysroot() + "/" + parts[0])
-			}
-		}
-	}
-
 	os.Remove(manifest)
-	os.Remove(links)
 
 	cleanupEmptyDirs(sysroot())
 
@@ -78,8 +59,4 @@ func cleanupEmptyDirs(root string) {
 			os.Remove(d)
 		}
 	}
-}
-
-func fmtln(args ...any) {
-	fmt.Println(args...)
 }

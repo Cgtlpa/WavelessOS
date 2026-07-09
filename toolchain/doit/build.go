@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -87,6 +88,27 @@ func acquire(pkg string) {
 		}
 	}
 
+	extractDir := tmpdir() + "/" + name
+	if version != "" {
+		extractDir += "-" + version
+	}
+	os.MkdirAll(extractDir, 0755)
+
+	wavSrc := extractDir + "/src"
+	if source != "" {
+		err := extractSource(source, wavSrc)
+		if err != nil {
+			fatalln(err)
+		}
+	}
+
+	actualSrc := findActualSrcDir(wavSrc)
+	if actualSrc != "" {
+		wavSrc = actualSrc
+	}
+
+	before := walkSysroot()
+
 	r := runner{
 		dir: dir,
 		env: []string{
@@ -96,17 +118,10 @@ func acquire(pkg string) {
 			"WAV_CACHE=" + cachedir(),
 			"WAV_TMP=" + tmpdir(),
 			"WAV_JOBS=" + jobs(),
-			"WAV_SRC=" + srcDir(name, version),
-			"WAV_BUILD_DIR=" + buildDir(name, version),
+			"WAV_SRC=" + wavSrc,
+			"WAV_BUILD_DIR=" + extractDir,
 			"PATH=" + os.Getenv("PATH"),
 		},
-	}
-
-	if source != "" {
-		err := extractSource(name, version, source)
-		if err != nil {
-			fatalln(err)
-		}
 	}
 
 	if hasScript(dir, "build") {
@@ -125,7 +140,15 @@ func acquire(pkg string) {
 		}
 	}
 
+	after := walkSysroot()
+	manifest := diffFiles(after, before)
+
 	err := recordInstall(name, version, dir)
+	if err != nil {
+		fatalln(err)
+	}
+
+	err = saveManifest(name, manifest)
 	if err != nil {
 		fatalln(err)
 	}
@@ -147,16 +170,21 @@ func (r *runner) run(name string, args ...string) error {
 	return cmd.Run()
 }
 
-func srcDir(name, version string) string {
-	return buildDir(name, version) + "/src"
-}
-
-func buildDir(name, version string) string {
-	d := tmpdir() + "/" + name
-	if version != "" {
-		d += "-" + version
+func findActualSrcDir(parent string) string {
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return ""
 	}
-	return d
+	dirs := []string{}
+	for _, e := range entries {
+		if e.IsDir() {
+			dirs = append(dirs, e.Name())
+		}
+	}
+	if len(dirs) != 1 {
+		return ""
+	}
+	return parent + "/" + dirs[0]
 }
 
 func downloadSource(name, version, url string) error {
@@ -181,9 +209,8 @@ func tarballName(url string) string {
 	return parts[len(parts)-1]
 }
 
-func extractSource(name, version, url string) error {
+func extractSource(url, dest string) error {
 	tarball := cachedir() + "/" + tarballName(url)
-	dest := buildDir(name, version)
 
 	err := os.MkdirAll(dest, 0755)
 	if err != nil {
@@ -228,4 +255,46 @@ func recordInstall(name, version, recipeDir string) error {
 
 	entry := fmt.Sprintf("name=%s\nversion=%s\nrecipe=%s\n", name, version, recipeDir)
 	return os.WriteFile(dbdir+"/"+name, []byte(entry), 0644)
+}
+
+func walkSysroot() map[string]bool {
+	files := make(map[string]bool)
+	root := sysroot()
+	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if path == root {
+			return nil
+		}
+		rel, _ := filepath.Rel(root, path)
+		files[rel] = true
+		return nil
+	})
+	return files
+}
+
+func diffFiles(after, before map[string]bool) []string {
+	var newFiles []string
+	for f := range after {
+		if !before[f] {
+			newFiles = append(newFiles, f)
+		}
+	}
+	return newFiles
+}
+
+func saveManifest(name string, files []string) error {
+	manifestDir := sysroot() + "/.wav/manifests"
+	err := os.MkdirAll(manifestDir, 0755)
+	if err != nil {
+		return err
+	}
+
+	var buf strings.Builder
+	for _, f := range files {
+		buf.WriteString(f)
+		buf.WriteString("\n")
+	}
+	return os.WriteFile(manifestDir+"/"+name, []byte(buf.String()), 0644)
 }

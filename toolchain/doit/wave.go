@@ -8,7 +8,7 @@ import (
 
 func wave() {
 	if len(os.Args) < 4 {
-		die("usage: doit wave <acquire(Install)|annihilate(Remove)|find(Search Package)> <package|query>")
+		die("usage: doit wave <acquire|annihilate|find|config> <package|query>")
 	}
 
 	action := os.Args[2]
@@ -21,6 +21,8 @@ func wave() {
 		annihilate(arg)
 	case "find":
 		search(arg)
+	case "config":
+		config(arg)
 	default:
 		die("unknown action: %s", action)
 	}
