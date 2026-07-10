@@ -1,37 +1,114 @@
 #!/bin/sh
 
-export DIALOGRC=/dev/null
-export NCURSES_NO_UTF8_ACS=1
-
 if [ "$(id -u)" != 0 ]; then
 	echo "run as root"
 	exit 1
 fi
 
-if ! command -v dialog >/dev/null 2>&1; then
-	echo "install dialog first"
-	exit 1
-fi
-
-if ! command -v mkfs.xfs >/dev/null 2>&1; then
-	echo "install xfsprogs first"
-	exit 1
-fi
-
-if ! command -v parted >/dev/null 2>&1; then
-	echo "install parted first"
-	exit 1
-fi
-
-if ! command -v mkfs.fat >/dev/null 2>&1; then
-	echo "install dosfstools first"
-	exit 1
+# dialog/whiptail/shell fallback
+if command -v dialog >/dev/null 2>&1; then
+	DIALOG=dialog
+	WHIPTAIL=
+elif command -v whiptail >/dev/null 2>&1; then
+	DIALOG=whiptail
+	WHIPTAIL=1
+else
+	DIALOG=
+	WHIPTAIL=
 fi
 
 die() {
-	dialog --backtitle "WavelessOS Installer" --msgbox "$1" 6 50
+	msgbox "$1"
 	exit 1
 }
+
+msgbox() {
+	local text="$1" h="${2:-6}" w="${3:-50}"
+	if [ -n "$DIALOG" ]; then
+		if [ "$DIALOG" = whiptail ]; then
+			whiptail --msgbox "$text" "$h" "$w"
+		else
+			dialog --backtitle "WavelessOS Installer" --msgbox "$text" "$h" "$w"
+		fi
+	else
+		echo "$text"
+		echo "Press Enter to continue..."
+		read dummy
+	fi
+}
+
+infobox() {
+	local text="$1" h="${2:-3}" w="${3:-40}"
+	if [ -n "$DIALOG" ]; then
+		if [ "$DIALOG" = whiptail ]; then
+			echo "$text"
+		else
+			dialog --backtitle "WavelessOS Installer" --infobox "$text" "$h" "$w"
+		fi
+	else
+		echo "$text"
+	fi
+}
+
+yesno() {
+	local text="$1" h="${2:-8}" w="${3:-50}" default="$4"
+	if [ -n "$DIALOG" ]; then
+		local def=""
+		[ "$default" = no ] && def="--defaultno"
+		if [ "$DIALOG" = whiptail ]; then
+			whiptail $def --yesno "$text" "$h" "$w"
+		else
+			dialog --backtitle "WavelessOS Installer" $def --yesno "$text" "$h" "$w"
+		fi
+	else
+		local prompt="${text} [y/N]: "
+		[ "$default" = no ] && prompt="${text} [y/N]: " || prompt="${text} [Y/n]: "
+		echo -n "$prompt"
+		read ans
+		[ "$default" = no ] && [ "$ans" != y ] && [ "$ans" != Y ] && return 1
+		[ "$default" != no ] && [ "$ans" = n ] || [ "$ans" = N ] && return 1
+		return 0
+	fi
+}
+
+menu() {
+	local text="$1" h="$2" w="$3" mh="$4"
+	shift 4
+	if [ -n "$DIALOG" ]; then
+		if [ "$DIALOG" = whiptail ]; then
+			whiptail --menu "$text" "$h" "$w" "$mh" "$@" 2>&1 >/dev/tty
+		else
+			dialog --backtitle "WavelessOS Installer" --menu "$text" "$h" "$w" "$mh" "$@" 2>&1 >/dev/tty
+		fi
+	else
+		echo "$text" >&2
+		local i=1
+		while [ $# -ge 2 ]; do
+			echo "  $i) $2" >&2
+			i=$((i + 1))
+			shift 2
+		done
+		echo -n "select [1-$((i-1))]: " >&2
+		read sel
+		echo "$sel"
+	fi
+}
+
+# tool checks — soft, allow fallback
+XFS_AVAIL=0; command -v mkfs.xfs >/dev/null 2>&1 && XFS_AVAIL=1
+PARTED_AVAIL=0; command -v parted >/dev/null 2>&1 && PARTED_AVAIL=1
+GRUB_AVAIL=0; command -v grub-install >/dev/null 2>&1 && GRUB_AVAIL=1
+LSBLK_AVAIL=0; command -v lsblk >/dev/null 2>&1 && LSBLK_AVAIL=1
+
+MKE2FS=""
+for e in mkfs.ext4 mkfs.ext3 mkfs.ext2; do
+	command -v "$e" >/dev/null 2>&1 && MKE2FS="$e" && break
+done
+
+MKDOS=""
+for e in mkfs.fat mkfs.vfat mkdosfs; do
+	command -v "$e" >/dev/null 2>&1 && MKDOS="$e" && break
+done
 
 HEIGHT=20
 WIDTH=70
@@ -43,11 +120,15 @@ check_net() {
 do_install() {
 	DISK=$1
 
-	dialog --backtitle "WavelessOS Installer" --infobox "partitioning $DISK..." 3 40
-	parted -s "$DISK" mklabel gpt
-	parted -s "$DISK" mkpart primary 1MiB 513MiB
-	parted -s "$DISK" set 1 esp on
-	parted -s "$DISK" mkpart primary 513MiB 100%
+	infobox "partitioning $DISK..."
+	if [ "$PARTED_AVAIL" = 1 ]; then
+		parted -s "$DISK" mklabel gpt
+		parted -s "$DISK" mkpart primary 1MiB 513MiB
+		parted -s "$DISK" set 1 esp on
+		parted -s "$DISK" mkpart primary 513MiB 100%
+	else
+		printf "o\nn\np\n1\n\n+512M\nt\nc\nn\np\n2\n\n\nw\n" | fdisk "$DISK" >/dev/null 2>&1 || die "fdisk failed"
+	fi
 	PART1="${DISK}1"
 	PART2="${DISK}2"
 	if [ ! -b "$PART2" ]; then
@@ -55,11 +136,21 @@ do_install() {
 		PART1="${DISK}p1"
 	fi
 
-	dialog --backtitle "WavelessOS Installer" --infobox "formatting partitions..." 3 40
-	mkfs.fat -F32 "$PART1" >/dev/null 2>&1 || die "failed to format $PART1"
-	mkfs.xfs -f "$PART2" >/dev/null 2>&1 || die "failed to format $PART2"
+	infobox "formatting partitions..."
+	if [ -n "$MKDOS" ]; then
+		$MKDOS -F32 "$PART1" >/dev/null 2>&1 || die "failed to format $PART1"
+	else
+		die "no FAT formatter found (install dosfstools or enable mkfs.vfat in busybox)"
+	fi
+	if [ "$XFS_AVAIL" = 1 ]; then
+		mkfs.xfs -f "$PART2" >/dev/null 2>&1 || die "failed to format $PART2"
+	elif [ -n "$MKE2FS" ]; then
+		$MKE2FS -F "$PART2" >/dev/null 2>&1 || die "failed to format $PART2"
+	else
+		die "no filesystem formatter found (install xfsprogs)"
+	fi
 
-	dialog --backtitle "WavelessOS Installer" --infobox "mounting partitions..." 3 40
+	infobox "mounting partitions..."
 	mount "$PART2" /mnt || die "failed to mount $PART2 on /mnt"
 	mkdir -p /mnt/boot
 	mount "$PART1" /mnt/boot || die "failed to mount $PART1 on /mnt/boot"
@@ -67,7 +158,7 @@ do_install() {
 	ROOTFS="/usr/local/waveless"
 	if [ ! -d "$ROOTFS" ]; then
 		ROOTFS="/mnt"
-		dialog --backtitle "WavelessOS Installer" --infobox "no sysroot found, installing minimal..." 3 50
+		infobox "no sysroot found, installing minimal..."
 		mkdir -p /mnt/{bin,sbin,etc,dev,proc,sys,tmp,var/log,run,mnt,usr/{bin,sbin,lib,share},lib/modules,boot}
 		echo "waveless" > /mnt/etc/hostname 2>/dev/null
 
@@ -76,11 +167,11 @@ do_install() {
 			DOIT_SRC="$(dirname "$0")/../toolchain/doit"
 		fi
 		if [ -f "$DOIT_SRC/main.go" ] && command -v go >/dev/null 2>&1; then
-			dialog --backtitle "WavelessOS Installer" --infobox "building doit..." 3 40
+			infobox "building doit..."
 			CGO_ENABLED=0 go build -ldflags="-s -w" -o /mnt/usr/bin/doit "$DOIT_SRC" 2>/dev/null
 		fi
 	else
-		dialog --backtitle "WavelessOS Installer" --infobox "copying system files..." 3 40
+		infobox "copying system files..."
 		cp -a "$ROOTFS"/. /mnt/
 	fi
 
@@ -94,7 +185,7 @@ do_install() {
 	if [ ! -f /mnt/etc/inittab ]; then
 		cat > /mnt/etc/inittab << EOF
 ::sysinit:/etc/rc.init
-::askfirst:-/bin/sh
+::respawn:-/bin/sh
 ::ctrlaltdel:/sbin/reboot
 ::shutdown:/etc/rc.shutdown
 EOF
@@ -160,8 +251,8 @@ EOF
 		fi
 	} > "$GENFSTAB"
 
-	if command -v grub-install >/dev/null 2>&1; then
-		dialog --backtitle "WavelessOS Installer" --infobox "installing grub..." 3 40
+	if [ "$GRUB_AVAIL" = 1 ]; then
+		infobox "installing grub..."
 		if [ -d /sys/firmware/efi ]; then
 			grub-install --target=x86_64-efi --efi-directory=/mnt/boot --bootloader-id=WavelessOS >/dev/null 2>&1
 		else
@@ -198,12 +289,14 @@ EOF
 			fi
 			echo "}" >> /mnt/boot/grub/grub.cfg
 		fi
+	else
+		infobox "grub not found, skipping bootloader install"
 	fi
 
 	mkdir -p /mnt/etc
 	echo "waveless" > /mnt/etc/hostname
 
-	dialog --backtitle "WavelessOS Installer" --infobox "set root password..." 3 40
+	infobox "set root password..."
 	if [ -x /mnt/bin/busybox ]; then
 		chroot /mnt /bin/busybox passwd 2>/dev/null
 	elif [ -x /mnt/bin/sh ]; then
@@ -212,7 +305,7 @@ EOF
 
 	umount -R /mnt 2>/dev/null
 
-	dialog --backtitle "WavelessOS Installer" --msgbox "installation complete\n\nreboot and remove the install media" 7 50
+	msgbox "installation complete\n\nreboot and remove the install media" 7 50
 }
 
 while true; do
@@ -220,49 +313,58 @@ while true; do
 		break
 	fi
 
-	dialog --backtitle "WavelessOS Installer" --menu "no internet connection detected" 12 60 3 \
-		1 "launch nmtui to configure wifi" \
-		2 "skip and continue anyway" \
-		3 "abort installer" 2>/tmp/wav_net
+	if command -v nmtui >/dev/null 2>&1; then
+		net_sel=$(menu "no internet connection detected" 12 60 3 \
+			1 "launch nmtui to configure wifi" \
+			2 "skip and continue anyway" \
+			3 "abort installer")
+	else
+		net_sel=$(menu "no internet connection detected" 10 60 2 \
+			1 "skip and continue anyway" \
+			2 "abort installer")
+		net_sel=$((net_sel + 1))  # renumber 1→2, 2→3
+	fi
 
-	case $(cat /tmp/wav_net) in
-		1)
-			if command -v nmtui >/dev/null 2>&1; then
-				nmtui
-			else
-				dialog --backtitle "WavelessOS Installer" --msgbox "nmtui not found, configure wifi manually" 6 50
-			fi
-			;;
+	case $net_sel in
+		1) nmtui ;;
 		2) break ;;
 		3) exit 0 ;;
 	esac
 done
 
 DISKS=""
-for d in $(lsblk -ndo NAME,TYPE -e7 2>/dev/null | awk '$2 == "disk" {print $1}'); do
-	dev="/dev/$d"
-	size=$(lsblk -ndo SIZE "$dev" 2>/dev/null)
-	DISKS="$DISKS $dev $d ($size)"
-done
+if [ "$LSBLK_AVAIL" = 1 ]; then
+	for d in $(lsblk -ndo NAME,TYPE -e7 2>/dev/null | awk '$2 == "disk" {print $1}'); do
+		dev="/dev/$d"
+		size=$(lsblk -ndo SIZE "$dev" 2>/dev/null)
+		DISKS="$DISKS $dev $d ($size)"
+	done
+else
+	for d in $(fdisk -l 2>/dev/null | grep "^Disk /dev/" | grep -v loop | awk '{print $2}' | tr -d :); do
+		dev="$d"
+		dname=$(basename "$d")
+		size=$(fdisk -l "$dev" 2>/dev/null | head -1 | awk '{print $3" "$4}' | tr -d ,)
+		DISKS="$DISKS $dev $dname ($size)"
+	done
+fi
 
 if [ -z "$DISKS" ]; then
-	dialog --backtitle "WavelessOS Installer" --msgbox "no disks found" 5 40
+	msgbox "no disks found" 5 40
 	exit 1
 fi
 
-dialog --backtitle "WavelessOS Installer" --menu "select target disk" $HEIGHT $WIDTH 5 $DISKS 2>/tmp/wav_disk
-DISK=$(cat /tmp/wav_disk)
+DISK=$(menu "select target disk" $HEIGHT $WIDTH 5 $DISKS)
 
-dialog --backtitle "WavelessOS Installer" --defaultno --yesno "WARNING: all data on $DISK will be destroyed\n\ncontinue?" 8 50 || exit 0
+yesno "WARNING: all data on $DISK will be destroyed\n\ncontinue?" 8 50 no || exit 0
 
 do_install "$DISK"
 
 while true; do
-	dialog --backtitle "WavelessOS Installer" --menu "what now?" 10 50 2 \
+	done_sel=$(menu "what now?" 10 50 2 \
 		1 "reboot" \
-		2 "back to shell" 2>/tmp/wav_done
+		2 "back to shell")
 
-	case $(cat /tmp/wav_done) in
+	case $done_sel in
 		1) reboot ;;
 		2) exit 0 ;;
 	esac

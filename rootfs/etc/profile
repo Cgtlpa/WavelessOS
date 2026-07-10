@@ -1,0 +1,7 @@
+export TERM="${TERM:-linux}"
+stty sane 2>/dev/null || true
+
+if [ -x /usr/bin/bash ] && [ -z "$BASH_EXECED" ]; then
+    export BASH_EXECED=1
+    exec /usr/bin/bash --login
+fi

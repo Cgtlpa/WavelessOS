@@ -1,4 +1,4 @@
 ::sysinit:/etc/rc.init
-::askfirst:-/bin/sh
+::respawn:-/bin/sh
 ::ctrlaltdel:/sbin/reboot
 ::shutdown:/etc/rc.shutdown

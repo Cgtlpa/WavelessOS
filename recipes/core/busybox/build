@@ -2,7 +2,7 @@ cd "$WAV_SRC"
 
 if [ -f "$(dirname "$0")/config" ]; then
 	cp "$(dirname "$0")/config" .config
-	make olddefconfig
+	yes "" | make oldconfig
 else
 	make defconfig
 fi

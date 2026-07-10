@@ -1,5 +1,8 @@
 #!/bin/sh
 
+export TERM="${TERM:-linux}"
+stty sane < /dev/console 2>/dev/null || true
+
 mount -a
 mount -t tmpfs tmpfs /tmp
 mkdir -p /tmp/.X11-unix /tmp/.ICE-unix

@@ -7,7 +7,8 @@ OUTPUT="${1:-$REPO_DIR/iso/waveless.iso}"
 
 echo "=== building WavelessOS ISO ==="
 
-TMP="$(mktemp -d)"
+export TMPDIR=/var/tmp
+TMP="$(mktemp -d --tmpdir="$TMPDIR")"
 trap "rm -rf $TMP" EXIT
 
 ISODIR="$TMP/iso"
@@ -42,7 +43,24 @@ fi
 
 if command -v mksquashfs >/dev/null 2>&1; then
 	echo "creating live filesystem..."
-	mksquashfs "$WAV_SYSROOT" "$ISODIR/boot/waveless.squashfs" -comp xz -quiet
+	# generate pseudo file for rootfs overlay
+	PSEUDO="$TMP/pseudo"
+	> "$PSEUDO"
+	cd "$REPO_DIR/rootfs"
+	find . -type d ! -name . | while read d; do
+		echo "\"${d#.}\" d 755 0 0" >> "$PSEUDO"
+	done
+	find . -type f | while read f; do
+		mode="$(stat -c %a "$f")"
+		echo "\"${f#.}\" f $mode 0 0 cat \"$REPO_DIR/rootfs${f#.}\"" >> "$PSEUDO"
+	done
+	find . -type l | while read l; do
+		target="$(readlink "$l")"
+		echo "\"${l#.}\" s 777 0 0 \"$target\"" >> "$PSEUDO"
+	done
+	cd /
+	mksquashfs "$WAV_SYSROOT" "$ISODIR/boot/waveless.squashfs" \
+		-pf "$PSEUDO" -comp xz -quiet
 	LIVE="squashfs"
 else
 	echo "squashfs-tools not found, omitting live filesystem"
@@ -50,23 +68,17 @@ else
 	LIVE="none"
 fi
 
-if [ -d /sys/firmware/efi ]; then
-	BOOT_MODE="efi"
-else
-	BOOT_MODE="bios"
-fi
-
 cat > "$ISODIR/boot/grub/grub.cfg" << 'GRUB'
 set timeout=10
 set default=0
 
 menuentry "WavelessOS Live" {
-	linux /boot/vmlinuz rw quiet
+	linux /boot/vmlinuz rw console=ttyS0 console=tty0 nomodeset
 	initrd /boot/initramfs.img
 }
 
 menuentry "WavelessOS Install" {
-	linux /boot/vmlinuz rw quiet install
+	linux /boot/vmlinuz rw console=ttyS0 console=tty0 nomodeset install
 	initrd /boot/initramfs.img
 }
 

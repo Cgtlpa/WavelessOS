@@ -1,5 +1,8 @@
 {
-	"logo": "/usr/share/waveless/logo.txt",
+	"logo": {
+		"type": "file-raw",
+		"source": "/usr/share/waveless/logo.txt"
+	},
 	"display": {
 		"separator": " -> "
 	}
