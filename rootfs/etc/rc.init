@@ -1,0 +1,18 @@
+#!/bin/sh
+
+mount -a
+mount -t tmpfs tmpfs /tmp
+mkdir -p /tmp/.X11-unix /tmp/.ICE-unix
+chmod 1777 /tmp
+
+hostname -F /etc/hostname 2>/dev/null || hostname waveless
+
+if [ -x /sbin/udevd ]; then
+	/sbin/udevd --daemon
+	/sbin/udevadm trigger
+	/sbin/udevadm settle
+fi
+
+if [ -x /etc/rc.local ]; then
+	/etc/rc.local
+fi

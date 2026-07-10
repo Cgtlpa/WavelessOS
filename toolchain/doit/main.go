@@ -7,7 +7,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		die("usage: doit wave <acquire|annihilate|find|config> <package|query>")
+		die("usage: doit wave <acquire|build|annihilate|find|config> <package|query>")
 	}
 
 	switch os.Args[1] {

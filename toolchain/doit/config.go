@@ -52,10 +52,19 @@ func config(pkg string) {
 	}
 
 	savedir := sysroot() + "/usr/src/" + name
-	os.MkdirAll(savedir, 0755)
-	os.WriteFile(savedir+"/.config", data, 0644)
-	banner("config saved to " + savedir + "/.config")
+	if err := os.MkdirAll(savedir, 0755); err != nil {
+		banner("warning: could not create " + savedir + ": " + err.Error())
+	} else {
+		if err := os.WriteFile(savedir+"/.config", data, 0644); err != nil {
+			banner("warning: could not save config to " + savedir + ": " + err.Error())
+		} else {
+			banner("config saved to " + savedir + "/.config")
+		}
+	}
 
-	os.WriteFile(dir+"/config", data, 0644)
-	banner("config also saved to " + dir + "/config")
+	if err := os.WriteFile(dir+"/config", data, 0644); err != nil {
+		banner("warning: could not save config to " + dir + "/config: " + err.Error())
+	} else {
+		banner("config also saved to " + dir + "/config")
+	}
 }

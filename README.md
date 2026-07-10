@@ -16,7 +16,7 @@ While WavelessOS is source-based, Wave supports **binary packages** for heavy so
 
 ### Syntax
 
-Instead of `sudo` or `doas`, we use `doit`—a lightweight alternative written in Rust.
+Instead of `sudo` or `doas`, we use `doit`—a lightweight alternative written in Go.
 
 * **Install a package:**
 ```bash

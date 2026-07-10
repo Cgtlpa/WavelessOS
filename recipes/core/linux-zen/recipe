@@ -1,3 +1,0 @@
-name=linux-zen
-version=6.12-zen1
-source=https://github.com/zen-kernel/zen-kernel/archive/refs/tags/v6.12-zen1.tar.gz

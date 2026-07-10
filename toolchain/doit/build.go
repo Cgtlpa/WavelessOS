@@ -66,6 +66,13 @@ func jobs() string {
 }
 
 func acquire(pkg string) {
+	if acquirePrebuilt(pkg) {
+		return
+	}
+	acquireSource(pkg)
+}
+
+func acquireSource(pkg string) {
 	dir, ok := pkgDir(pkg)
 	if !ok {
 		die("package %s not found", pkg)
@@ -154,6 +161,139 @@ func acquire(pkg string) {
 	}
 
 	banner(name + " package compiled!")
+}
+
+func buildPkg(pkg string) {
+	dir, ok := pkgDir(pkg)
+	if !ok {
+		die("package %s not found", pkg)
+	}
+
+	vars := recipeVars(dir)
+	name := vars["name"]
+	if name == "" {
+		name = pkg
+	}
+	version := vars["version"]
+
+	acquireSource(pkg)
+
+	manifestFile := sysroot() + "/.wav/manifests/" + name
+	data, err := os.ReadFile(manifestFile)
+	if err != nil {
+		die("no manifest found for %s (build may have failed)", name)
+	}
+
+	files := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(files) == 0 || (len(files) == 1 && files[0] == "") {
+		die("no files to package for %s", name)
+	}
+
+	listFile := tmpdir() + "/" + name + "-filelist"
+	os.WriteFile(listFile, []byte(strings.Join(files, "\n")), 0644)
+
+	targetDir := pkgTargetDir(dir)
+	if targetDir == "" {
+		die("no pkgs repo directory found for %s", pkg)
+	}
+
+	os.MkdirAll(targetDir, 0755)
+	tarball := targetDir + "/" + name + "-" + version + ".tar.zst"
+
+	banner("packaging " + tarball)
+	err = run("tar", "--zstd", "-cf", tarball, "--files-from", listFile, "-C", sysroot())
+	if err != nil {
+		fatalln(err)
+	}
+
+	banner(name + " prebuilt saved to " + tarball)
+}
+
+func acquirePrebuilt(pkg string) bool {
+	cfg := loadConfig()
+	for _, r := range cfg.Repos {
+		rp := r.Path
+		if !filepath.IsAbs(rp) {
+			cwd, err := os.Getwd()
+			if err != nil {
+				continue
+			}
+			rp = cwd + "/" + rp
+		}
+		if !strings.Contains(rp, "/pkgs/") {
+			continue
+		}
+		entries, err := os.ReadDir(rp)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			if strings.HasPrefix(e.Name(), pkg+"-") &&
+				(strings.HasSuffix(e.Name(), ".tar.zst") || strings.HasSuffix(e.Name(), ".tar.gz")) {
+				rest := strings.TrimPrefix(e.Name(), pkg+"-")
+				version := strings.TrimSuffix(rest, ".tar.zst")
+				version = strings.TrimSuffix(version, ".tar.gz")
+
+				banner("found prebuilt: " + e.Name())
+
+				before := walkSysroot()
+				err = run("tar", "-xf", rp+"/"+e.Name(), "-C", sysroot())
+				if err != nil {
+					fatalln(err)
+				}
+				after := walkSysroot()
+
+				recordInstall(pkg, version, rp)
+				saveManifest(pkg, diffFiles(after, before))
+
+				banner(pkg + " package installed from prebuilt!")
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func pkgTargetDir(recipeDir string) string {
+	cfg := loadConfig()
+	recipeDir = filepath.Clean(recipeDir)
+
+	for _, r := range cfg.Repos {
+		rp := r.Path
+		if !filepath.IsAbs(rp) {
+			cwd, err := os.Getwd()
+			if err != nil {
+				continue
+			}
+			rp = cwd + "/" + rp
+		}
+		rp = filepath.Clean(rp)
+
+		rel, err := filepath.Rel(rp, recipeDir)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			continue
+		}
+
+		for _, p := range cfg.Repos {
+			pp := p.Path
+			if !strings.Contains(pp, "/pkgs/") {
+				continue
+			}
+			if (strings.Contains(rp, "/recipes/core") && strings.Contains(pp, "/pkgs/core")) ||
+				(strings.Contains(rp, "/recipes/extra") && strings.Contains(pp, "/pkgs/extra")) ||
+				(strings.Contains(rp, "/recipes/desktop") && strings.Contains(pp, "/pkgs/desktop")) {
+				if filepath.IsAbs(pp) {
+					return pp
+				}
+				cwd, _ := os.Getwd()
+				return cwd + "/" + pp
+			}
+		}
+	}
+	return ""
 }
 
 type runner struct {
@@ -260,6 +400,9 @@ func recordInstall(name, version, recipeDir string) error {
 func walkSysroot() map[string]bool {
 	files := make(map[string]bool)
 	root := sysroot()
+	if _, err := os.Stat(root); os.IsNotExist(err) {
+		return files
+	}
 	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil

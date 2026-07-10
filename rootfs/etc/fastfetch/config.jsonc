@@ -1,0 +1,6 @@
+{
+	"logo": "/usr/share/waveless/logo.txt",
+	"display": {
+		"separator": " -> "
+	}
+}

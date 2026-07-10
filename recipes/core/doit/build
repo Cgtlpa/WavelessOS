@@ -1,0 +1,2 @@
+cd "$(dirname "$0")/../../toolchain/doit"
+CGO_ENABLED=0 go build -ldflags="-s -w" -o "$WAV_BUILD_DIR/doit" .

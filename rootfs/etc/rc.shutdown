@@ -1,0 +1,7 @@
+#!/bin/sh
+
+killall5 -15
+sleep 1
+killall5 -9 2>/dev/null
+
+umount -a -r

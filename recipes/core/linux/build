@@ -1,0 +1,39 @@
+cd "$WAV_SRC"
+
+if [ -f "$WAV_SYSROOT/usr/src/linux/.config" ]; then
+	cp "$WAV_SYSROOT/usr/src/linux/.config" .config
+else
+	make defconfig 2>/dev/null || make x86_64_defconfig
+fi
+
+./scripts/config \
+	--enable CONFIG_ISO9660_FS \
+	--enable CONFIG_SQUASHFS \
+	--enable CONFIG_SQUASHFS_XZ \
+	--enable CONFIG_SQUASHFS_ZSTD \
+	--enable CONFIG_EFI_STUB \
+	--enable CONFIG_VFAT_FS \
+	--enable CONFIG_FAT_FS \
+	--enable CONFIG_NLS_CODEPAGE_437 \
+	--enable CONFIG_NLS_ISO8859_1 \
+	--enable CONFIG_NLS_UTF8 \
+	--enable CONFIG_ATA \
+	--enable CONFIG_BLK_DEV_NVME \
+	--enable CONFIG_VIRTIO_BLK \
+	--enable CONFIG_VIRTIO_PCI \
+	--enable CONFIG_EXT4_FS \
+	--enable CONFIG_XFS_FS \
+	--enable CONFIG_DEVTMPFS \
+	--enable CONFIG_UNIX \
+	--enable CONFIG_NET \
+	--enable CONFIG_BINFMT_MISC \
+	--enable CONFIG_INOTIFY_USER
+
+make olddefconfig
+
+sed -i '/^enum {$/i #if __STDC_VERSION__ < 202300L' "$WAV_SRC/include/linux/stddef.h"
+sed -i '/^};$/a #endif' "$WAV_SRC/include/linux/stddef.h"
+sed -i '/^typedef _Bool[[:space:]]*bool;$/i #if __STDC_VERSION__ < 202300L' "$WAV_SRC/include/linux/types.h"
+sed -i '/^typedef _Bool[[:space:]]*bool;$/a #endif' "$WAV_SRC/include/linux/types.h"
+
+make -j"$WAV_JOBS" KCFLAGS="-Wno-unterminated-string-initialization"

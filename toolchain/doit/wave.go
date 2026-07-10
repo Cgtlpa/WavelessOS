@@ -7,12 +7,15 @@ import (
 )
 
 func wave() {
-	if len(os.Args) < 4 {
-		die("usage: doit wave <acquire|annihilate|find|config> <package|query>")
+	if len(os.Args) < 3 {
+		die("usage: doit wave <acquire|build|annihilate|find|config> <package|query>")
 	}
 
 	action := os.Args[2]
-	arg := os.Args[3]
+	arg := ""
+	if len(os.Args) >= 4 {
+		arg = os.Args[3]
+	}
 
 	switch action {
 	case "acquire":
@@ -21,6 +24,8 @@ func wave() {
 		annihilate(arg)
 	case "find":
 		search(arg)
+	case "build":
+		buildPkg(arg)
 	case "config":
 		config(arg)
 	default:
@@ -29,21 +34,10 @@ func wave() {
 }
 
 func pkgDir(name string) (string, bool) {
-	dirs := []string{
-		"recipes/core/" + name,
-		"recipes/extra/" + name,
-		"recipes/desktop/" + name,
-		"pkgs/core/" + name,
-		"pkgs/extra/" + name,
-	}
+	cfg := loadConfig()
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", false
-	}
-
-	for _, d := range dirs {
-		path := cwd + "/" + d
+	for _, r := range cfg.repoPaths() {
+		path := r + "/" + name
 		if info, err := os.Stat(path); err == nil && info.IsDir() {
 			return path, true
 		}
@@ -56,21 +50,10 @@ func banner(msg string) {
 }
 
 func search(query string) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		die("cant get working dir")
-	}
-
-	roots := []string{
-		cwd + "/recipes/core",
-		cwd + "/recipes/extra",
-		cwd + "/recipes/desktop",
-		cwd + "/pkgs/core",
-		cwd + "/pkgs/extra",
-	}
+	cfg := loadConfig()
 
 	found := 0
-	for _, root := range roots {
+	for _, root := range cfg.repoPaths() {
 		entries, err := os.ReadDir(root)
 		if err != nil {
 			continue
@@ -91,10 +74,7 @@ func search(query string) {
 						}
 					}
 				}
-				where := "recipes/"
-				if strings.Contains(root, "/pkgs/") {
-					where = "pkgs/"
-				}
+				where := cfg.repoLabel(root)
 				if version != "" {
 					fmt.Printf("  %s (%s) [%s]\n", name, version, where)
 				} else {

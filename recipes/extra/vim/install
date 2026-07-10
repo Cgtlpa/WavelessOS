@@ -1,0 +1,3 @@
+cd "$WAV_SRC"
+make DESTDIR="$WAV_SYSROOT" install
+ln -sf vim "$WAV_SYSROOT/usr/bin/vi" 2>/dev/null || true

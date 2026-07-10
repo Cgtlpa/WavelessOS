@@ -53,7 +53,7 @@ static void sighandler(int sig)
 		running = 0;
 		break;
 	case SIGQUIT:
-		reboot(RB_AUTOBOOT);
+		running = 0;
 		break;
 	}
 }
@@ -71,20 +71,14 @@ static void setup_signals(void)
 	sigaction(SIGQUIT, &sa, NULL);
 	sigaction(SIGHUP, &sa, NULL);
 
-	signal(SIGPIPE, SIG_IGN);
-	signal(SIGTSTP, SIG_IGN);
+	sa.sa_handler = SIG_IGN;
+	sigaction(SIGPIPE, &sa, NULL);
+	sigaction(SIGTSTP, &sa, NULL);
 }
 
 static void run_init(void)
 {
-	const char *prog = "/sbin/openrc-init";
-	if (access(prog, X_OK) == 0) {
-		execl(prog, prog, NULL);
-		fprintf(stderr, "init: failed to exec %s: %s\n", prog, strerror(errno));
-		return;
-	}
-
-	prog = "/etc/rc.init";
+	const char *prog = "/etc/rc.init";
 	if (access(prog, X_OK) == 0) {
 		execl(prog, prog, NULL);
 		fprintf(stderr, "init: failed to exec %s: %s\n", prog, strerror(errno));

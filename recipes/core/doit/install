@@ -1,0 +1,2 @@
+mkdir -p "$WAV_SYSROOT/usr/bin"
+cp "$WAV_BUILD_DIR/doit" "$WAV_SYSROOT/usr/bin/doit"

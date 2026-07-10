@@ -1,0 +1,3 @@
+cd "$WAV_SRC"
+./configure --prefix=/usr --sysconfdir=/etc
+make -j"$WAV_JOBS"
