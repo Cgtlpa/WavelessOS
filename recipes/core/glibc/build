@@ -1,0 +1,11 @@
+mkdir -p "$WAV_BUILD_DIR"/build
+cd "$WAV_BUILD_DIR"/build
+
+"$WAV_SRC"/configure \
+	--prefix=/usr \
+	--with-headers="$WAV_SYSROOT"/usr/include \
+	--sysconfdir=/etc \
+	--disable-werror \
+	--enable-kernel=6.12
+
+make -j"$WAV_JOBS"
