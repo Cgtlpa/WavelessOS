@@ -1,20 +1,17 @@
 #!/bin/sh
+set -e
 
 if [ "$(id -u)" != 0 ]; then
 	echo "run as root"
 	exit 1
 fi
 
-# dialog/whiptail/shell fallback
 if command -v dialog >/dev/null 2>&1; then
 	DIALOG=dialog
-	WHIPTAIL=
 elif command -v whiptail >/dev/null 2>&1; then
 	DIALOG=whiptail
-	WHIPTAIL=1
 else
 	DIALOG=
-	WHIPTAIL=
 fi
 
 die() {
@@ -62,11 +59,14 @@ yesno() {
 		fi
 	else
 		local prompt="${text} [y/N]: "
-		[ "$default" = no ] && prompt="${text} [y/N]: " || prompt="${text} [Y/n]: "
+		[ "$default" != no ] && prompt="${text} [Y/n]: "
 		echo -n "$prompt"
 		read ans
-		[ "$default" = no ] && [ "$ans" != y ] && [ "$ans" != Y ] && return 1
-		[ "$default" != no ] && [ "$ans" = n ] || [ "$ans" = N ] && return 1
+		if [ "$default" = no ]; then
+			[ "$ans" != y ] && [ "$ans" != Y ] && return 1
+		else
+			[ "$ans" = n ] || [ "$ans" = N ] && return 1
+		fi
 		return 0
 	fi
 }
@@ -76,9 +76,9 @@ menu() {
 	shift 4
 	if [ -n "$DIALOG" ]; then
 		if [ "$DIALOG" = whiptail ]; then
-			whiptail --menu "$text" "$h" "$w" "$mh" "$@" 2>&1 >/dev/tty
+			whiptail --menu "$text" "$h" "$w" "$mh" "$@" 2>/dev/tty
 		else
-			dialog --backtitle "WavelessOS Installer" --menu "$text" "$h" "$w" "$mh" "$@" 2>&1 >/dev/tty
+			dialog --backtitle "WavelessOS Installer" --menu "$text" "$h" "$w" "$mh" "$@" 2>/dev/tty
 		fi
 	else
 		echo "$text" >&2
@@ -94,7 +94,6 @@ menu() {
 	fi
 }
 
-# tool checks — soft, allow fallback
 XFS_AVAIL=0; command -v mkfs.xfs >/dev/null 2>&1 && XFS_AVAIL=1
 PARTED_AVAIL=0; command -v parted >/dev/null 2>&1 && PARTED_AVAIL=1
 GRUB_AVAIL=0; command -v grub-install >/dev/null 2>&1 && GRUB_AVAIL=1
@@ -127,7 +126,7 @@ do_install() {
 		parted -s "$DISK" set 1 esp on
 		parted -s "$DISK" mkpart primary 513MiB 100%
 	else
-		printf "o\nn\np\n1\n\n+512M\nt\nc\nn\np\n2\n\n\nw\n" | fdisk "$DISK" >/dev/null 2>&1 || die "fdisk failed"
+		printf "g\nn\n1\n\n+512M\nt\n\n1\nn\n2\n\n\nw\n" | fdisk "$DISK" >/dev/null 2>&1 || die "fdisk failed"
 	fi
 	PART1="${DISK}1"
 	PART2="${DISK}2"
@@ -161,15 +160,6 @@ do_install() {
 		infobox "no sysroot found, installing minimal..."
 		mkdir -p /mnt/{bin,sbin,etc,dev,proc,sys,tmp,var/log,run,mnt,usr/{bin,sbin,lib,share},lib/modules,boot}
 		echo "waveless" > /mnt/etc/hostname 2>/dev/null
-
-		DOIT_SRC="/toolchain/doit"
-		if [ ! -d "$DOIT_SRC" ]; then
-			DOIT_SRC="$(dirname "$0")/../toolchain/doit"
-		fi
-		if [ -f "$DOIT_SRC/main.go" ] && command -v go >/dev/null 2>&1; then
-			infobox "building doit..."
-			CGO_ENABLED=0 go build -ldflags="-s -w" -o /mnt/usr/bin/doit "$DOIT_SRC" 2>/dev/null
-		fi
 	else
 		infobox "copying system files..."
 		cp -a "$ROOTFS"/. /mnt/
@@ -178,14 +168,14 @@ do_install() {
 	if [ -f /mnt/sbin/init ]; then
 		:
 	elif [ -f /mnt/bin/busybox ]; then
-		ln -s /bin/busybox /mnt/sbin/init 2>/dev/null
+		ln -sf /bin/busybox /mnt/sbin/init 2>/dev/null
 	fi
 
 	mkdir -p /mnt/etc/init.d
 	if [ ! -f /mnt/etc/inittab ]; then
 		cat > /mnt/etc/inittab << EOF
 ::sysinit:/etc/rc.init
-::respawn:-/bin/sh
+::respawn:-/usr/bin/bash
 ::ctrlaltdel:/sbin/reboot
 ::shutdown:/etc/rc.shutdown
 EOF
@@ -235,6 +225,12 @@ BUG_REPORT_URL=""
 EOF
 	fi
 
+	if [ ! -f /mnt/etc/doas.conf ]; then
+		echo "permit persist keepenv root" > /mnt/etc/doas.conf
+		echo "permit persist keepenv :wheel" >> /mnt/etc/doas.conf
+		mkdir -p /mnt/etc/group
+	fi
+
 	GENFSTAB="/mnt/etc/fstab"
 	{
 		echo "proc      /proc   proc   defaults    0 0"
@@ -242,8 +238,9 @@ EOF
 		echo "tmpfs     /run    tmpfs  mode=0755   0 0"
 		echo "devtmpfs  /dev    devtmpfs defaults  0 0"
 		PART2_UUID=$(blkid -s UUID -o value "$PART2" 2>/dev/null)
+		PART2_FSTYPE=$(blkid -s TYPE -o value "$PART2" 2>/dev/null)
 		if [ -n "$PART2_UUID" ]; then
-			echo "UUID=$PART2_UUID / xfs defaults,relatime 0 1"
+			echo "UUID=$PART2_UUID / ${PART2_FSTYPE:-xfs} defaults,relatime 0 1"
 		fi
 		PART1_UUID=$(blkid -s UUID -o value "$PART1" 2>/dev/null)
 		if [ -n "$PART1_UUID" ]; then
@@ -277,6 +274,10 @@ EOF
 
 		if [ -n "$KERNEL" ]; then
 			mkdir -p /mnt/boot/grub
+			PART2_UUID=$(blkid -s UUID -o value "$PART2" 2>/dev/null || true)
+			if [ -z "$PART2_UUID" ]; then
+				die "failed to get UUID for $PART2"
+			fi
 			cat > /mnt/boot/grub/grub.cfg << EOF
 set timeout=3
 set default=0
@@ -298,12 +299,14 @@ EOF
 
 	infobox "set root password..."
 	if [ -x /mnt/bin/busybox ]; then
-		chroot /mnt /bin/busybox passwd 2>/dev/null
-	elif [ -x /mnt/bin/sh ]; then
-		chroot /mnt /bin/sh -c "passwd" 2>/dev/null
+		echo "root:waveless" | chroot /mnt /bin/busybox chpasswd 2>/dev/null || echo "warning: failed to set root password"
+	elif [ -x /mnt/usr/bin/bash ]; then
+		echo "root:waveless" | chroot /mnt /usr/bin/bash -c "chpasswd" 2>/dev/null || echo "warning: failed to set root password"
 	fi
 
-	umount -R /mnt 2>/dev/null
+	for m in /mnt/proc /mnt/sys /mnt/dev /mnt/boot /mnt; do
+		umount "$m" 2>/dev/null || true
+	done
 
 	msgbox "installation complete\n\nreboot and remove the install media" 7 50
 }
@@ -322,13 +325,16 @@ while true; do
 		net_sel=$(menu "no internet connection detected" 10 60 2 \
 			1 "skip and continue anyway" \
 			2 "abort installer")
-		net_sel=$((net_sel + 1))  # renumber 1→2, 2→3
+		if [ -n "$net_sel" ]; then
+			net_sel=$((net_sel + 1))
+		fi
 	fi
 
 	case $net_sel in
 		1) nmtui ;;
 		2) break ;;
 		3) exit 0 ;;
+		*) break ;;
 	esac
 done
 
@@ -337,14 +343,14 @@ if [ "$LSBLK_AVAIL" = 1 ]; then
 	for d in $(lsblk -ndo NAME,TYPE -e7 2>/dev/null | awk '$2 == "disk" {print $1}'); do
 		dev="/dev/$d"
 		size=$(lsblk -ndo SIZE "$dev" 2>/dev/null)
-		DISKS="$DISKS $dev $d ($size)"
+		DISKS="$DISKS $dev ${d}(${size})"
 	done
 else
 	for d in $(fdisk -l 2>/dev/null | grep "^Disk /dev/" | grep -v loop | awk '{print $2}' | tr -d :); do
 		dev="$d"
 		dname=$(basename "$d")
-		size=$(fdisk -l "$dev" 2>/dev/null | head -1 | awk '{print $3" "$4}' | tr -d ,)
-		DISKS="$DISKS $dev $dname ($size)"
+		size=$(fdisk -l "$dev" 2>/dev/null | head -1 | awk '{print $3 $4}' | tr -d ,)
+		DISKS="$DISKS $dev ${dname}(${size})"
 	done
 fi
 
@@ -355,6 +361,7 @@ fi
 
 DISK=$(menu "select target disk" $HEIGHT $WIDTH 5 $DISKS)
 
+[ -z "$DISK" ] && exit 0
 yesno "WARNING: all data on $DISK will be destroyed\n\ncontinue?" 8 50 no || exit 0
 
 do_install "$DISK"
@@ -367,5 +374,6 @@ while true; do
 	case $done_sel in
 		1) reboot ;;
 		2) exit 0 ;;
+		*) exit 0 ;;
 	esac
 done

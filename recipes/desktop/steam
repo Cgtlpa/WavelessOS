@@ -1,0 +1,14 @@
+name=steam
+version=1.0.0.81
+source=https://cdn.akamai.steamstatic.com/client/installer/steam.deb
+depends=(gtk3 xorg-server libgl mesa nss)
+build() {
+    cd "$WAV_SRC"
+    dpkg-deb -x *.deb "$WAV_SYSROOT"
+}
+install() {
+    mkdir -p "$WAV_SYSROOT/opt" "$WAV_SYSROOT/usr/bin"
+    cp -a "$WAV_SRC/usr/lib/steam" "$WAV_SYSROOT/opt/steam" 2>/dev/null || true
+    cp -a "$WAV_SRC/usr/lib/steamlauncher" "$WAV_SYSROOT/opt/steamlauncher" 2>/dev/null || true
+    ln -sf /opt/steam/steam "$WAV_SYSROOT/usr/bin/steam" 2>/dev/null || true
+}

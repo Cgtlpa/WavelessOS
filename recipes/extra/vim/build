@@ -1,3 +1,0 @@
-cd "$WAV_SRC"
-./configure --prefix=/usr --sysconfdir=/etc --with-features=tiny --disable-gui --without-x --disable-gpm
-make -j"$WAV_JOBS"

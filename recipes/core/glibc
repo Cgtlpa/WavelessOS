@@ -1,0 +1,18 @@
+name=glibc
+version=2.40
+source=https://ftp.gnu.org/gnu/glibc/glibc-2.40.tar.xz
+build() {
+    mkdir -p "$WAV_BUILD_DIR"/build
+    cd "$WAV_BUILD_DIR"/build
+    "$WAV_SRC"/configure \
+        --prefix=/usr \
+        --with-headers="$WAV_SYSROOT"/usr/include \
+        --sysconfdir=/etc \
+        --disable-werror \
+        --enable-kernel=6.12
+    make -j"$WAV_JOBS"
+}
+install() {
+    cd "$WAV_BUILD_DIR"/build
+    make DESTDIR="$WAV_SYSROOT" install
+}

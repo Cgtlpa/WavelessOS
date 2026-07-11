@@ -3,7 +3,11 @@ case "$1" in
 	bound|renew)
 		ifconfig "$interface" "$ip" netmask "$subnet" broadcast "$broadcast"
 		[ -n "$router" ] && route add default gw "$router" dev "$interface" 2>/dev/null
-		[ -n "$dns" ] && echo "nameserver $dns" > /etc/resolv.conf 2>/dev/null
+		if [ -n "$dns" ]; then
+			for nameserver in $dns; do
+				echo "nameserver $nameserver"
+			done > /etc/resolv.conf
+		fi
 		;;
 	deconfig)
 		ifconfig "$interface" 0.0.0.0

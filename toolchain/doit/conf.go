@@ -17,14 +17,16 @@ type Config struct {
 }
 
 func loadConfig() *Config {
-	cfg := &Config{
-		Repos: defaultRepos(),
-	}
+	cfg := &Config{Repos: defaultRepos()}
 
 	candidates := []string{
-		"wave.conf",
 		sysroot() + "/etc/wave.conf",
 		"/etc/wave.conf",
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		for dir := cwd; dir != filepath.Dir(dir); dir = filepath.Dir(dir) {
+			candidates = append([]string{dir + "/wave.conf"}, candidates...)
+		}
 	}
 
 	for _, path := range candidates {
@@ -32,50 +34,55 @@ func loadConfig() *Config {
 		if err != nil {
 			continue
 		}
-		defer f.Close()
-
-		var repos []Repo
-		var cur *Repo
-		scan := bufio.NewScanner(f)
-		for scan.Scan() {
-			line := strings.TrimSpace(scan.Text())
-			if line == "" || strings.HasPrefix(line, "#") {
-				continue
+		repos := parseConf(f)
+		f.Close()
+		if len(repos) == 0 {
+			continue
+		}
+		cfg.Repos = repos
+		configDir := filepath.Dir(path)
+		for i := range cfg.Repos {
+			if rp := cfg.Repos[i].Path; !filepath.IsAbs(rp) {
+				cfg.Repos[i].Path = filepath.Clean(configDir + "/" + rp)
 			}
+		}
+		break
+	}
+	return cfg
+}
 
-			if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-				if cur != nil && cur.Path != "" {
-					repos = append(repos, *cur)
-				}
-				cur = &Repo{Name: line[1 : len(line)-1]}
-				continue
+func parseConf(f *os.File) []Repo {
+	var repos []Repo
+	var cur *Repo
+	scan := bufio.NewScanner(f)
+	for scan.Scan() {
+		line := strings.TrimSpace(scan.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			if cur != nil && cur.Path != "" {
+				repos = append(repos, *cur)
 			}
-
-			if cur == nil {
-				continue
-			}
-
-			if strings.HasPrefix(line, "Path") || strings.HasPrefix(line, "path") {
-				val := strings.TrimSpace(line[4:])
-				if strings.HasPrefix(val, "=") {
-					val = strings.TrimSpace(val[1:])
-				}
-				if val != "" {
+			cur = &Repo{Name: line[1 : len(line)-1]}
+			continue
+		}
+		if cur == nil {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(line), "path") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				if val := strings.TrimSpace(parts[1]); val != "" {
 					cur.Path = val
 				}
 			}
 		}
-		if cur != nil && cur.Path != "" {
-			repos = append(repos, *cur)
-		}
-
-		if len(repos) > 0 {
-			cfg.Repos = repos
-		}
-		break
 	}
-
-	return cfg
+	if cur != nil && cur.Path != "" {
+		repos = append(repos, *cur)
+	}
+	return repos
 }
 
 func defaultRepos() []Repo {
@@ -83,42 +90,11 @@ func defaultRepos() []Repo {
 		{Name: "core", Path: "recipes/core"},
 		{Name: "extra", Path: "recipes/extra"},
 		{Name: "desktop", Path: "recipes/desktop"},
+		{Name: "xfce", Path: "recipes/xfce"},
 		{Name: "pkgs-core", Path: "pkgs/core"},
 		{Name: "pkgs-extra", Path: "pkgs/extra"},
 		{Name: "pkgs-desktop", Path: "pkgs/desktop"},
 	}
 }
 
-func (c *Config) repoPaths() []string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		var out []string
-		for _, r := range c.Repos {
-			out = append(out, r.Path)
-		}
-		return out
-	}
-	var out []string
-	for _, r := range c.Repos {
-		if filepath.IsAbs(r.Path) {
-			out = append(out, r.Path)
-		} else {
-			out = append(out, cwd+"/"+r.Path)
-		}
-	}
-	return out
-}
 
-func (c *Config) repoLabel(path string) string {
-	for _, r := range c.Repos {
-		rp := r.Path
-		if !filepath.IsAbs(rp) {
-			cwd, _ := os.Getwd()
-			rp = cwd + "/" + rp
-		}
-		if strings.HasPrefix(path, rp) {
-			return r.Name
-		}
-	}
-	return "unknown"
-}

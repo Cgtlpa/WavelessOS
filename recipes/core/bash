@@ -1,0 +1,12 @@
+name=bash
+version=5.2
+source=https://ftp.gnu.org/gnu/bash/bash-5.2.tar.gz
+build() {
+    cd "$WAV_SRC"
+    ./configure CC="${CC:-gcc} -std=gnu11" --prefix=/usr --without-bash-malloc --disable-readline --disable-history --disable-progcomp
+    make CC="${CC:-gcc} -std=gnu11"
+}
+install() {
+    cd "$WAV_SRC"
+    make DESTDIR="$WAV_SYSROOT" install
+}

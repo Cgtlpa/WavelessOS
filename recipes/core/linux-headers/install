@@ -1,2 +1,0 @@
-cd "$WAV_SRC"
-make headers_install INSTALL_HDR_PATH="$WAV_SYSROOT/usr"

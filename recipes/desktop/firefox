@@ -1,0 +1,27 @@
+name=firefox
+version=140.0
+source=https://download.mozilla.org/?product=firefox-140.0&os=linux64&lang=en-US
+depends=(gtk3 dbus xorg-server pulseaudio nss)
+build() {
+    cd "$WAV_SRC"
+    tar xf firefox-*.tar.xz
+    mkdir -p "$WAV_BUILD_DIR"/build
+    cd "$WAV_BUILD_DIR"/build
+    "$WAV_SRC/firefox/mach" configure --prefix="$WAV_SYSROOT" --disable-crashreporter --disable-updater
+    "$WAV_SRC/firefox/mach" build -j"$WAV_JOBS"
+}
+install() {
+    cd "$WAV_BUILD_DIR"/build
+    "$WAV_SRC/firefox/mach" install
+    mkdir -p "$WAV_SYSROOT/usr/bin" "$WAV_SYSROOT/usr/share/applications"
+    ln -sf "$WAV_SYSROOT/opt/firefox/firefox" "$WAV_SYSROOT/usr/bin/firefox"
+    cat > "$WAV_SYSROOT/usr/share/applications/firefox.desktop" << EOF
+[Desktop Entry]
+Name=Firefox
+Exec=firefox %u
+Icon=firefox
+Type=Application
+Categories=Network;WebBrowser;
+MimeType=text/html;text/xml;x-scheme-handler/http;x-scheme-handler/https;
+EOF
+}

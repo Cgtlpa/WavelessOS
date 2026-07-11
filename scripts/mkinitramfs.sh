@@ -8,9 +8,9 @@ echo "=== building initramfs ==="
 
 export TMPDIR="${TMPDIR:-/var/tmp}"
 TMP="$(mktemp -d --tmpdir="$TMPDIR")"
-trap "rm -rf $TMP" EXIT
+trap 'rm -rf "$TMP"' EXIT
 
-mkdir -p "$TMP"/{bin,sbin,dev,etc,proc,sys,newroot,live}
+mkdir -p "$TMP"/{bin,sbin,usr/bin,dev,etc,proc,sys,newroot,live}
 
 if [ -f "$WAV_SYSROOT/bin/busybox" ]; then
 	cp "$WAV_SYSROOT/bin/busybox" "$TMP/bin/"
@@ -21,9 +21,34 @@ else
 	exit 1
 fi
 
-for applet in sh mount umount cat ls echo test mkdir mknod modprobe sleep switch_root findfs; do
-	ln -s busybox "$TMP/bin/$applet"
+for applet in sh ash mount umount cat ls echo test mkdir mknod modprobe sleep switch_root findfs setsid cttyhack reboot poweroff halt hostname id stty; do
+	ln -sf busybox "$TMP/bin/$applet"
 done
+
+for applet in switch_root reboot poweroff halt; do
+	ln -sf busybox "$TMP/sbin/$applet"
+done
+
+if [ -f "$WAV_SYSROOT/usr/bin/bash" ]; then
+	cp "$WAV_SYSROOT/usr/bin/bash" "$TMP/usr/bin/bash"
+	ln -sf bash "$TMP/usr/bin/sh"
+fi
+
+if [ -f "$WAV_SYSROOT/usr/bin/dialog" ]; then
+	cp "$WAV_SYSROOT/usr/bin/dialog" "$TMP/usr/bin/dialog"
+fi
+
+if [ -f "$WAV_SYSROOT/usr/bin/doas" ]; then
+	cp "$WAV_SYSROOT/usr/bin/doas" "$TMP/usr/bin/doas"
+fi
+
+if [ -f "$WAV_SYSROOT/usr/bin/wget" ]; then
+	cp "$WAV_SYSROOT/usr/bin/wget" "$TMP/usr/bin/wget" 2>/dev/null || true
+fi
+
+if [ -f "$WAV_SYSROOT/usr/bin/cp" ]; then
+	cp "$WAV_SYSROOT/usr/bin/cp" "$TMP/usr/bin/cp" 2>/dev/null || true
+fi
 
 mknod -m 622 "$TMP/dev/console" c 5 1
 mknod -m 666 "$TMP/dev/null" c 1 3
@@ -39,7 +64,6 @@ cat > "$TMP/init" << 'INITEOF'
 
 cmdline=$(/bin/busybox cat /proc/cmdline)
 
-# check for install parameter
 install_mode=""
 for x in $cmdline; do
 	if [ "$x" = "install" ]; then
@@ -47,7 +71,6 @@ for x in $cmdline; do
 	fi
 done
 
-# try root= from cmdline
 root=""
 for x in $cmdline; do
 	case "$x" in
@@ -73,41 +96,56 @@ if [ -n "$root" ]; then
 	fi
 fi
 
-# try to mount ISO (for live/install environment)
 for _ in 1 2 3 4 5; do
-	for cdrom in /dev/sr0 /dev/sr1 /dev/vdb /dev/sda /dev/cdrom; do
-		if [ -b "$cdrom" ]; then
-			/bin/busybox mount "$cdrom" /newroot 2>/dev/null && break 2
+	for dev in /dev/sr[0-9] /dev/cdrom; do
+		if [ -b "$dev" ]; then
+			/bin/busybox mount "$dev" /newroot 2>/dev/null && break 2
+		fi
+	done
+	for dev in $(/bin/busybox ls /sys/block/ 2>/dev/null); do
+		case "$dev" in
+			loop*|ram*) continue ;;
+		esac
+		if [ -b "/dev/$dev" ]; then
+			/bin/busybox mount "/dev/$dev" /newroot 2>/dev/null && break 2
 		fi
 	done
 	/bin/busybox sleep 1
 done
 
 if [ -z "$install_mode" ] && [ -f /newroot/boot/waveless.squashfs ]; then
-	/bin/busybox mount /newroot/boot/waveless.squashfs /live
-	/bin/busybox mount --move /proc /live/proc
-	/bin/busybox mount --move /sys /live/sys
-	/bin/busybox mount --move /dev /live/dev
-	exec /bin/busybox switch_root /live /sbin/init
+	/bin/busybox mkdir -p /squashfs /overlay/upper /overlay/work
+	/bin/busybox mount -t squashfs /newroot/boot/waveless.squashfs /squashfs 2>/dev/null
+	/bin/busybox mount -t tmpfs tmpfs /overlay 2>/dev/null
+	/bin/busybox mount -t overlay overlay \
+		-o lowerdir=/squashfs,upperdir=/overlay/upper,workdir=/overlay/work \
+		/newroot 2>/dev/null
+	if [ -x /newroot/sbin/init ]; then
+		/bin/busybox mkdir -p /newroot/proc /newroot/sys /newroot/dev
+		/bin/busybox mount --move /proc /newroot/proc 2>/dev/null
+		/bin/busybox mount --move /sys /newroot/sys 2>/dev/null
+		/bin/busybox mount --move /dev /newroot/dev 2>/dev/null
+		exec /bin/busybox switch_root /newroot /sbin/init
+	fi
 fi
 
-if [ -z "$install_mode" ] && { [ -b /dev/disk/by-label/WAVELESS ] || [ -b /dev/disk/by-uuid/WAVELESS ]; }; then
-	root_dev=""
-	for dev in /dev/disk/by-label/WAVELESS /dev/disk/by-uuid/WAVELESS; do
-		[ -b "$dev" ] && root_dev="$dev" && break
-	done
-	if [ -n "$root_dev" ]; then
-		/bin/busybox mkdir -p /live
-		/bin/busybox mount "$root_dev" /live 2>/dev/null
-		if [ -f /live/boot/waveless.squashfs ]; then
-			/bin/busybox mount /live/boot/waveless.squashfs /live 2>/dev/null || true
-		fi
-		if [ -x /live/sbin/init ]; then
-			/bin/busybox mount --move /proc /live/proc
-			/bin/busybox mount --move /sys /live/sys
-			/bin/busybox mount --move /dev /live/dev
-			exec /bin/busybox switch_root /live /sbin/init
-		fi
+if [ -z "$install_mode" ] && [ -b /dev/disk/by-label/WAVELESS ]; then
+	root_dev="/dev/disk/by-label/WAVELESS"
+	/bin/busybox mkdir -p /squashfs /overlay/upper /overlay/work
+	/bin/busybox mount "$root_dev" /squashfs 2>/dev/null
+	if [ -f /squashfs/boot/waveless.squashfs ]; then
+		/bin/busybox mount -t squashfs /squashfs/boot/waveless.squashfs /live 2>/dev/null
+		/bin/busybox mount -t tmpfs tmpfs /overlay 2>/dev/null
+		/bin/busybox mount -t overlay overlay \
+			-o lowerdir=/live,upperdir=/overlay/upper,workdir=/overlay/work \
+			/squashfs 2>/dev/null
+	fi
+	if [ -x /squashfs/sbin/init ]; then
+		/bin/busybox mkdir -p /squashfs/proc /squashfs/sys /squashfs/dev
+		/bin/busybox mount --move /proc /squashfs/proc 2>/dev/null
+		/bin/busybox mount --move /sys /squashfs/sys 2>/dev/null
+		/bin/busybox mount --move /dev /squashfs/dev 2>/dev/null
+		exec /bin/busybox switch_root /squashfs /sbin/init
 	fi
 fi
 
@@ -115,32 +153,34 @@ if [ -f /newroot/scripts/installer.sh ]; then
 	if [ -f /newroot/boot/waveless.squashfs ]; then
 		/bin/busybox mount /newroot/boot/waveless.squashfs /live
 	fi
-	/bin/busybox echo "WavelessOS live environment"
+
+	export PATH="/usr/bin:/bin:/sbin:/newroot/usr/bin:/newroot/usr/sbin:/newroot/scripts:/live/usr/bin:/live/usr/sbin:/live/bin:/live/sbin"
+
 	if [ -n "$install_mode" ]; then
-		export PATH=/bin:/sbin:/live/bin:/live/sbin:/live/usr/bin:/live/usr/sbin
 		/bin/busybox echo "running installer..."
-		/bin/busybox sh /newroot/scripts/installer.sh
-		/bin/busybox echo "installer exited, dropping to shell"
+		exec /bin/busybox sh /newroot/scripts/installer.sh
 	fi
-	export PATH=/bin:/sbin:/newroot/scripts:/newroot/usr/bin:/live/bin:/live/sbin:/live/usr/bin:/live/usr/sbin
-	/bin/busybox echo "run 'installer' to start installation or 'reboot' to reboot"
-	echo "#!/bin/busybox sh" > /bin/installer
-	echo "exec /bin/busybox sh /newroot/scripts/installer.sh" >> /bin/installer
-	/bin/busybox chmod +x /bin/installer
+
+	/bin/busybox echo "WavelessOS live environment"
+	/bin/busybox echo "type 'installer' to install or 'reboot' to reboot"
+
 	while true; do
-		/bin/busybox sh
+		setsid cttyhack /usr/bin/bash -c 'export PATH="/usr/bin:/bin:/sbin:/newroot/usr/bin:/newroot/usr/sbin:/newroot/scripts:/live/usr/bin:/live/usr/sbin:/live/bin:/live/sbin"; exec /usr/bin/bash' 2>/dev/null || setsid cttyhack sh
 		/bin/busybox echo "shell exited, use 'reboot' to reboot"
-		/bin/busybox sleep 1
 	done
 fi
 
 /bin/busybox echo "initramfs: no root found, dropping to shell"
-exec /bin/busybox sh
+exec setsid cttyhack sh
 INITEOF
 
 chmod +x "$TMP/init"
 
 cd "$TMP"
-find . | cpio -oH newc 2>/dev/null | gzip > "$OUTPUT"
+(find . | cpio -oH newc) | gzip > "$OUTPUT"
+if [ ! -s "$OUTPUT" ]; then
+	echo "error: initramfs is empty"
+	exit 1
+fi
 
 echo "initramfs written to $OUTPUT ($(du -h "$OUTPUT" | cut -f1))"

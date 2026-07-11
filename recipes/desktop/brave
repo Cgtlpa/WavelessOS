@@ -1,0 +1,22 @@
+name=brave
+version=1.92.138
+source=https://github.com/brave/brave-browser/releases/download/v1.92.138/brave-browser-1.92.138-linux-amd64.zip
+depends=(gtk3 xorg-server nss cups)
+build() {
+    cd "$WAV_SRC"
+    unzip -qo brave-browser-*.zip
+}
+install() {
+    mkdir -p "$WAV_SYSROOT/opt" "$WAV_SYSROOT/usr/bin" "$WAV_SYSROOT/usr/share/applications"
+    cp -a "$WAV_SRC/brave-browser" "$WAV_SYSROOT/opt/brave-browser"
+    ln -sf /opt/brave-browser/brave-browser "$WAV_SYSROOT/usr/bin/brave-browser"
+    cat > "$WAV_SYSROOT/usr/share/applications/brave-browser.desktop" << EOF
+[Desktop Entry]
+Name=Brave Browser
+Exec=/opt/brave-browser/brave-browser --ozone-platform=x11 %U
+Icon=brave-browser
+Type=Application
+Categories=Network;WebBrowser;
+MimeType=x-scheme-handler/http;x-scheme-handler/https;
+EOF
+}

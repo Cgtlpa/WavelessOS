@@ -1,9 +1,0 @@
-cd "$WAV_SRC"
-
-mkdir -p "$WAV_SYSROOT/boot" "$WAV_SYSROOT/usr/src/linux"
-
-make modules_install INSTALL_MOD_PATH="$WAV_SYSROOT"
-make install INSTALL_PATH="$WAV_SYSROOT/boot"
-
-cp .config "$WAV_SYSROOT/usr/src/linux/.config"
-cp -r "$WAV_SRC"/* "$WAV_SYSROOT/usr/src/linux/" 2>/dev/null || true

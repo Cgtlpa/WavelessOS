@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 )
 
 func config(pkg string) {
@@ -10,7 +11,6 @@ func config(pkg string) {
 	if !ok {
 		die("package %s not found", pkg)
 	}
-
 	vars := recipeVars(dir)
 	name := vars["name"]
 	if name == "" {
@@ -22,9 +22,7 @@ func config(pkg string) {
 	if version != "" {
 		extractDir += "-" + version
 	}
-
-	src := extractDir + "/src"
-	actualSrc := findActualSrcDir(src)
+	actualSrc := findActualSrcDir(extractDir + "/src")
 	if actualSrc == "" {
 		die("source not extracted yet, run 'doit wave acquire %s' first", pkg)
 	}
@@ -39,32 +37,24 @@ func config(pkg string) {
 		"WAV_VERSION="+version,
 		"WAV_SYSROOT="+sysroot(),
 	)
-	err := cmd.Run()
-	if err != nil {
+	if err := cmd.Run(); err != nil {
 		fatalln(err)
 	}
 
-	srcfile := actualSrc + "/.config"
-	data, err := os.ReadFile(srcfile)
+	data, err := os.ReadFile(actualSrc + "/.config")
 	if err != nil {
 		banner("no .config found (did you save it?)")
 		return
 	}
 
 	savedir := sysroot() + "/usr/src/" + name
-	if err := os.MkdirAll(savedir, 0755); err != nil {
-		banner("warning: could not create " + savedir + ": " + err.Error())
-	} else {
-		if err := os.WriteFile(savedir+"/.config", data, 0644); err != nil {
-			banner("warning: could not save config to " + savedir + ": " + err.Error())
-		} else {
-			banner("config saved to " + savedir + "/.config")
-		}
+	if err := os.MkdirAll(savedir, 0755); err == nil {
+		os.WriteFile(savedir+"/.config", data, 0644)
+		banner("config saved to " + savedir + "/.config")
 	}
 
-	if err := os.WriteFile(dir+"/config", data, 0644); err != nil {
-		banner("warning: could not save config to " + dir + "/config: " + err.Error())
-	} else {
-		banner("config also saved to " + dir + "/config")
+	configDir := filepath.Dir(dir)
+	if err := os.WriteFile(configDir+"/config", data, 0644); err == nil {
+		banner("config also saved to " + configDir + "/config")
 	}
 }

@@ -1,0 +1,24 @@
+name=chromium
+version=137.0.7151.104
+source=https://download-chromium.appspot.com/dl/Linux_x64?type=snapshots
+depends=(gtk3 xorg-server nss cups)
+build() {
+    cd "$WAV_SRC"
+    if [ -f chrome-linux.zip ]; then
+        unzip -qo chrome-linux.zip
+    fi
+}
+install() {
+    mkdir -p "$WAV_SYSROOT/opt" "$WAV_SYSROOT/usr/bin" "$WAV_SYSROOT/usr/share/applications"
+    cp -a "$WAV_SRC/chrome-linux" "$WAV_SYSROOT/opt/chromium"
+    ln -sf /opt/chromium/chrome "$WAV_SYSROOT/usr/bin/chromium"
+    cat > "$WAV_SYSROOT/usr/share/applications/chromium.desktop" << EOF
+[Desktop Entry]
+Name=Chromium
+Exec=/opt/chromium/chrome --ozone-platform=x11 %U
+Icon=chromium
+Type=Application
+Categories=Network;WebBrowser;
+MimeType=x-scheme-handler/http;x-scheme-handler/https;
+EOF
+}

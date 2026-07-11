@@ -1,0 +1,11 @@
+name=pfetch
+version=0.6.0
+source=https://github.com/dylanaraps/pfetch/archive/master.tar.gz
+build() {
+    chmod +x "$WAV_SRC/pfetch"
+}
+install() {
+    mkdir -p "$WAV_SYSROOT/usr/bin"
+    cp "$WAV_SRC/pfetch" "$WAV_SYSROOT/usr/bin/pfetch"
+    chmod +x "$WAV_SYSROOT/usr/bin/pfetch"
+}

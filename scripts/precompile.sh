@@ -12,19 +12,19 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 missing=""
-for cmd in go wget make gcc cpio gzip; do
+for cmd in go wget make gcc cpio gzip file unzip tar zstd; do
 	command -v "$cmd" >/dev/null 2>&1 || missing="$missing $cmd"
 done
 if [ -n "$missing" ]; then
 	echo "error: missing required build tools:$missing"
-	echo "install them and try again"
 	exit 1
 fi
 
-echo "=== WavelessOS Bootstrap ==="
+echo "=== WavelessOS Precompile ==="
 echo "sysroot: $WAV_SYSROOT"
 echo "cache:   $WAV_CACHE"
 echo "tmp:     $WAV_TMP"
+echo "jobs:    $WAV_JOBS"
 echo ""
 
 mkdir -p "$WAV_SYSROOT"/{bin,sbin,etc,dev,proc,sys,tmp,run,var/log,mnt}
@@ -77,7 +77,15 @@ for pkg in pavucontrol pfetch fastfetch vim nano; do
 done
 
 echo ""
-echo "=== bootstrap complete ==="
+echo "building desktop applications..."
+
+for pkg in firefox; do
+	echo ""
+	echo ">>> acquiring $pkg..."
+	doit wave acquire "$pkg" || echo "warning: failed to acquire $pkg, skipping"
+done
+
+echo ""
+echo "=== precompile complete ==="
 echo "sysroot is at $WAV_SYSROOT"
-echo "run 'doit wave acquire <package>' to install more packages"
-echo "run the installer to deploy to disk"
+echo "run '$SCRIPT_DIR/mkiso.sh' to build the ISO"

@@ -1,3 +1,0 @@
-cd "$WAV_SRC"
-./configure --prefix="$WAV_SYSROOT" --static
-make -j"$WAV_JOBS"

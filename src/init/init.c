@@ -11,7 +11,8 @@
 #include <string.h>
 #include <errno.h>
 
-static int running = 1;
+static volatile sig_atomic_t running = 1;
+static volatile sig_atomic_t child_died = 0;
 
 static void try_mount(const char *src, const char *target, const char *type, unsigned long flags, const char *opts)
 {
@@ -46,12 +47,11 @@ static void sighandler(int sig)
 {
 	switch (sig) {
 	case SIGCHLD:
+		child_died = 1;
 		while (waitpid(-1, NULL, WNOHANG) > 0);
 		break;
 	case SIGTERM:
 	case SIGINT:
-		running = 0;
-		break;
 	case SIGQUIT:
 		running = 0;
 		break;
@@ -62,33 +62,32 @@ static void setup_signals(void)
 {
 	struct sigaction sa;
 	memset(&sa, 0, sizeof(sa));
+
 	sa.sa_handler = sighandler;
-	sigfillset(&sa.sa_mask);
+	sigemptyset(&sa.sa_mask);
+	sigaddset(&sa.sa_mask, SIGCHLD);
+	sigaddset(&sa.sa_mask, SIGTERM);
+	sigaddset(&sa.sa_mask, SIGINT);
+	sigaddset(&sa.sa_mask, SIGQUIT);
+	sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
 
 	sigaction(SIGCHLD, &sa, NULL);
 	sigaction(SIGTERM, &sa, NULL);
 	sigaction(SIGINT, &sa, NULL);
 	sigaction(SIGQUIT, &sa, NULL);
-	sigaction(SIGHUP, &sa, NULL);
 
 	sa.sa_handler = SIG_IGN;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = 0;
+	sigaction(SIGHUP, &sa, NULL);
 	sigaction(SIGPIPE, &sa, NULL);
 	sigaction(SIGTSTP, &sa, NULL);
 }
 
-static void run_init(void)
+static void run_script(const char *path)
 {
-	const char *prog = "/etc/rc.init";
-	if (access(prog, X_OK) == 0) {
-		execl(prog, prog, NULL);
-		fprintf(stderr, "init: failed to exec %s: %s\n", prog, strerror(errno));
-		return;
-	}
-
-	prog = getenv("SHELL");
-	if (!prog) prog = "/bin/sh";
-	execl(prog, prog, NULL);
-	fprintf(stderr, "init: failed to exec %s: %s\n", prog, strerror(errno));
+	execl(path, path, NULL);
+	fprintf(stderr, "init: failed to exec %s: %s\n", path, strerror(errno));
 }
 
 int main(void)
@@ -96,20 +95,43 @@ int main(void)
 	mount_fs();
 	setup_signals();
 
-	pid_t pid = fork();
+	const char *init_script = "/etc/rc.init";
+	if (access(init_script, X_OK) != 0)
+		init_script = NULL;
+
+	const char *shell = getenv("SHELL");
+	if (!shell) shell = "/bin/sh";
+
+	while (running) {
+		child_died = 0;
+
+		pid_t pid = fork();
 	if (pid == 0) {
 		setsid();
-		run_init();
+		if (init_script) {
+			run_script(init_script);
+			fprintf(stderr, "init: init script %s failed, falling back to shell\n", init_script);
+		}
+		run_script(shell);
 		_exit(1);
 	}
 
-	while (running) {
-		int status;
-		pid_t done = waitpid(-1, &status, 0);
-		if (done < 0 && errno == ECHILD)
+		if (pid < 0) {
+			perror("init: fork");
+			sleep(1);
+			continue;
+		}
+
+		while (running && !child_died)
 			pause();
+
+		if (!running)
+			break;
+
+		while (waitpid(-1, NULL, WNOHANG) > 0);
 	}
 
+	sync();
 	reboot(RB_HALT_SYSTEM);
 	return 0;
 }

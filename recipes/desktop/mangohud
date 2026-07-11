@@ -1,0 +1,19 @@
+name=mangohud
+version=0.8.4
+source=https://github.com/flightlessmango/MangoHud/releases/download/v0.8.4/MangoHud-0.8.4.r0.g992103e.tar.gz
+depends=(mesa dbus xrandr vulkan-loader glslang SPIRV-Tools)
+build() {
+    mkdir -p "$WAV_BUILD_DIR"/build
+    cd "$WAV_BUILD_DIR"/build
+    meson setup "$WAV_SRC" \
+        --prefix=/usr \
+        --sysconfdir=/etc \
+        --buildtype=release \
+        -Dwith_dbus=enabled \
+        -Dappend_libdir_mangohud=false
+    ninja -j"$WAV_JOBS"
+}
+install() {
+    cd "$WAV_BUILD_DIR"/build
+    DESTDIR="$WAV_SYSROOT" ninja install
+}

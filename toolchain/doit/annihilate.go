@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -16,6 +18,8 @@ func annihilate(pkg string) {
 	banner("annihilating " + pkg)
 
 	manifest := sysroot() + "/.wav/manifests/" + pkg
+	dirsToClean := make(map[string]bool)
+
 	if data, err := os.ReadFile(manifest); err == nil {
 		lines := strings.Split(string(data), "\n")
 		for _, line := range lines {
@@ -24,39 +28,34 @@ func annihilate(pkg string) {
 				continue
 			}
 			full := sysroot() + "/" + line
-			os.Remove(full)
+			if err := os.Remove(full); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not remove %s: %v\n", full, err)
+			} else {
+				dir := filepath.Dir(full)
+				for dir != "" && dir != sysroot() && dir != "/" {
+					dirsToClean[dir] = true
+					dir = filepath.Dir(dir)
+				}
+			}
 		}
 	}
 
-	os.Remove(dbFile)
-	os.Remove(manifest)
-
-	cleanupEmptyDirs(sysroot())
-
-	banner(pkg + " successfully removed")
-}
-
-func cleanupEmptyDirs(root string) {
-	dirs := []string{
-		root + "/bin",
-		root + "/sbin",
-		root + "/lib",
-		root + "/lib64",
-		root + "/usr/bin",
-		root + "/usr/sbin",
-		root + "/usr/lib",
-		root + "/usr/lib64",
-		root + "/usr/include",
-		root + "/usr/share",
-		root + "/etc",
+	if err := os.Remove(dbFile); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not remove database entry %s: %v\n", dbFile, err)
 	}
-	for _, d := range dirs {
-		entries, err := os.ReadDir(d)
+	if err := os.Remove(manifest); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not remove manifest %s: %v\n", manifest, err)
+	}
+
+	for dir := range dirsToClean {
+		entries, err := os.ReadDir(dir)
 		if err != nil {
 			continue
 		}
 		if len(entries) == 0 {
-			os.Remove(d)
+			os.Remove(dir)
 		}
 	}
+
+	banner(pkg + " successfully removed")
 }

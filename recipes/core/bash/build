@@ -1,3 +1,0 @@
-cd "$WAV_SRC"
-./configure CC="gcc -std=gnu11" --prefix=/usr --without-bash-malloc --disable-readline --disable-history --disable-progcomp
-make CC="gcc -std=gnu11"

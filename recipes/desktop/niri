@@ -1,0 +1,20 @@
+name=niri
+version=26.04
+source=https://api.github.com/repos/niri-wm/niri/tarball/v26.04
+depends=(wayland libinput mesa xwayland rust cargo)
+build() {
+    cd "$WAV_SRC"
+    cargo build --release
+}
+install() {
+    cd "$WAV_SRC"
+    cargo install --path . --root="$WAV_SYSROOT"
+    mkdir -p "$WAV_SYSROOT/usr/share/wayland-sessions"
+    cat > "$WAV_SYSROOT/usr/share/wayland-sessions/niri.desktop" << EOF
+[Desktop Entry]
+Name=Niri
+Exec=niri-session
+Type=Application
+DesktopNames=wlroots
+EOF
+}

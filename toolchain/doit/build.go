@@ -10,9 +10,9 @@ import (
 	"strings"
 )
 
-func recipeVars(dir string) map[string]string {
+func recipeVars(file string) map[string]string {
 	vars := make(map[string]string)
-	f, err := os.Open(dir + "/recipe")
+	f, err := os.Open(file)
 	if err != nil {
 		return vars
 	}
@@ -24,11 +24,19 @@ func recipeVars(dir string) map[string]string {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
+		if strings.HasPrefix(line, "build()") || strings.HasPrefix(line, "install()") {
+			break
+		}
 		parts := strings.SplitN(line, "=", 2)
 		if len(parts) != 2 {
 			continue
 		}
-		vars[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+		val := strings.TrimSpace(parts[1])
+		if strings.HasPrefix(val, "(") && strings.HasSuffix(val, ")") {
+			val = strings.TrimPrefix(val, "(")
+			val = strings.TrimSuffix(val, ")")
+		}
+		vars[strings.TrimSpace(parts[0])] = val
 	}
 	return vars
 }
@@ -72,6 +80,71 @@ func acquire(pkg string) {
 	acquireSource(pkg)
 }
 
+func extractFunc(file, funcName string) string {
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return ""
+	}
+
+	lines := strings.Split(string(data), "\n")
+	inFunc := false
+	braceCount := 0
+	var body strings.Builder
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		if !inFunc {
+			sig := funcName + "()"
+			if strings.HasPrefix(trimmed, sig) {
+				rest := strings.TrimSpace(strings.TrimPrefix(trimmed, sig))
+				if rest == "{" || strings.HasPrefix(rest, "{") {
+					inFunc = true
+					braceCount = 1
+					continue
+				}
+			}
+			continue
+		}
+
+		for _, ch := range trimmed {
+			if ch == '{' {
+				braceCount++
+			} else if ch == '}' {
+				braceCount--
+			}
+		}
+
+		if braceCount <= 0 {
+			break
+		}
+
+		body.WriteString(line)
+		body.WriteString("\n")
+	}
+
+	return body.String()
+}
+
+func runScript(env []string, script string) error {
+	if strings.TrimSpace(script) == "" {
+		return nil
+	}
+	tmp, err := os.CreateTemp("", "wav-*.sh")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	tmp.WriteString("#!/bin/sh\nset -e\n")
+	tmp.WriteString(script)
+	tmp.Close()
+	cmd := exec.Command("sh", tmp.Name())
+	cmd.Env = env
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 func acquireSource(pkg string) {
 	dir, ok := pkgDir(pkg)
 	if !ok {
@@ -88,8 +161,10 @@ func acquireSource(pkg string) {
 
 	banner("acquiring " + name)
 
+	var cachedPath string
 	if source != "" {
-		err := downloadSource(name, version, source)
+		var err error
+		cachedPath, err = downloadSource(name, version, source)
 		if err != nil {
 			fatalln(err)
 		}
@@ -99,11 +174,13 @@ func acquireSource(pkg string) {
 	if version != "" {
 		extractDir += "-" + version
 	}
-	os.MkdirAll(extractDir, 0755)
+	if err := os.MkdirAll(extractDir, 0755); err != nil {
+		fatalln(err)
+	}
 
 	wavSrc := extractDir + "/src"
 	if source != "" {
-		err := extractSource(source, wavSrc)
+		err := extractSource(cachedPath, wavSrc)
 		if err != nil {
 			fatalln(err)
 		}
@@ -116,32 +193,31 @@ func acquireSource(pkg string) {
 
 	before := walkSysroot()
 
-	r := runner{
-		dir: dir,
-		env: []string{
-			"WAV_PKG=" + name,
-			"WAV_VERSION=" + version,
-			"WAV_SYSROOT=" + sysroot(),
-			"WAV_CACHE=" + cachedir(),
-			"WAV_TMP=" + tmpdir(),
-			"WAV_JOBS=" + jobs(),
-			"WAV_SRC=" + wavSrc,
-			"WAV_BUILD_DIR=" + extractDir,
-			"PATH=" + os.Getenv("PATH"),
-		},
+	env := []string{
+		"WAV_PKG=" + name,
+		"WAV_VERSION=" + version,
+		"WAV_SYSROOT=" + sysroot(),
+		"WAV_CACHE=" + cachedir(),
+		"WAV_TMP=" + tmpdir(),
+		"WAV_JOBS=" + jobs(),
+		"WAV_SRC=" + wavSrc,
+		"WAV_BUILD_DIR=" + extractDir,
+		"PATH=" + os.Getenv("PATH"),
 	}
 
-	if hasScript(dir, "build") {
+	buildScript := extractFunc(dir, "build")
+	if strings.TrimSpace(buildScript) != "" {
 		banner("building " + name)
-		err := r.run("bash", dir+"/build")
+		err := runScript(env, buildScript)
 		if err != nil {
 			fatalln(err)
 		}
 	}
 
-	if hasScript(dir, "install") {
+	installScript := extractFunc(dir, "install")
+	if strings.TrimSpace(installScript) != "" {
 		banner("installing " + name)
-		err := r.run("bash", dir+"/install")
+		err := runScript(env, installScript)
 		if err != nil {
 			fatalln(err)
 		}
@@ -190,14 +266,18 @@ func buildPkg(pkg string) {
 	}
 
 	listFile := tmpdir() + "/" + name + "-filelist"
-	os.WriteFile(listFile, []byte(strings.Join(files, "\n")), 0644)
+	if err := os.WriteFile(listFile, []byte(strings.Join(files, "\n")), 0644); err != nil {
+		fatalln(err)
+	}
 
 	targetDir := pkgTargetDir(dir)
 	if targetDir == "" {
 		die("no pkgs repo directory found for %s", pkg)
 	}
 
-	os.MkdirAll(targetDir, 0755)
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		fatalln(err)
+	}
 	tarball := targetDir + "/" + name + "-" + version + ".tar.zst"
 
 	banner("packaging " + tarball)
@@ -213,13 +293,6 @@ func acquirePrebuilt(pkg string) bool {
 	cfg := loadConfig()
 	for _, r := range cfg.Repos {
 		rp := r.Path
-		if !filepath.IsAbs(rp) {
-			cwd, err := os.Getwd()
-			if err != nil {
-				continue
-			}
-			rp = cwd + "/" + rp
-		}
 		if !strings.Contains(rp, "/pkgs/") {
 			continue
 		}
@@ -246,8 +319,12 @@ func acquirePrebuilt(pkg string) bool {
 				}
 				after := walkSysroot()
 
-				recordInstall(pkg, version, rp)
-				saveManifest(pkg, diffFiles(after, before))
+				if err := recordInstall(pkg, version, rp); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: failed to record install: %v\n", err)
+				}
+				if err := saveManifest(pkg, diffFiles(after, before)); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: failed to save manifest: %v\n", err)
+				}
 
 				banner(pkg + " package installed from prebuilt!")
 				return true
@@ -257,57 +334,38 @@ func acquirePrebuilt(pkg string) bool {
 	return false
 }
 
-func pkgTargetDir(recipeDir string) string {
+func pkgTargetDir(recipeFile string) string {
 	cfg := loadConfig()
-	recipeDir = filepath.Clean(recipeDir)
+	recipeFile = filepath.Clean(recipeFile)
 
+	category := ""
 	for _, r := range cfg.Repos {
-		rp := r.Path
-		if !filepath.IsAbs(rp) {
-			cwd, err := os.Getwd()
-			if err != nil {
-				continue
-			}
-			rp = cwd + "/" + rp
-		}
-		rp = filepath.Clean(rp)
-
-		rel, err := filepath.Rel(rp, recipeDir)
+		rp := filepath.Clean(r.Path)
+		rel, err := filepath.Rel(rp, filepath.Dir(recipeFile))
 		if err != nil || strings.HasPrefix(rel, "..") {
 			continue
 		}
+		category = r.Name
+		break
+	}
 
-		for _, p := range cfg.Repos {
-			pp := p.Path
-			if !strings.Contains(pp, "/pkgs/") {
-				continue
-			}
-			if (strings.Contains(rp, "/recipes/core") && strings.Contains(pp, "/pkgs/core")) ||
-				(strings.Contains(rp, "/recipes/extra") && strings.Contains(pp, "/pkgs/extra")) ||
-				(strings.Contains(rp, "/recipes/desktop") && strings.Contains(pp, "/pkgs/desktop")) {
-				if filepath.IsAbs(pp) {
-					return pp
-				}
-				cwd, _ := os.Getwd()
-				return cwd + "/" + pp
-			}
+	targetMap := map[string]string{
+		"core":    "pkgs/core",
+		"extra":   "pkgs/extra",
+		"desktop": "pkgs/desktop",
+		"xfce":    "pkgs/desktop",
+	}
+
+	target, ok := targetMap[category]
+	if !ok {
+		return ""
+	}
+	for _, r := range cfg.Repos {
+		if r.Path == target {
+			return r.Path
 		}
 	}
 	return ""
-}
-
-type runner struct {
-	dir string
-	env []string
-}
-
-func (r *runner) run(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
-	cmd.Dir = r.dir
-	cmd.Env = r.env
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
 }
 
 func findActualSrcDir(parent string) string {
@@ -327,56 +385,115 @@ func findActualSrcDir(parent string) string {
 	return parent + "/" + dirs[0]
 }
 
-func downloadSource(name, version, url string) error {
+func downloadSource(name, version, url string) (string, error) {
 	cache := cachedir()
 	err := os.MkdirAll(cache, 0755)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	tarball := cache + "/" + tarballName(url)
-	if _, err := os.Stat(tarball); err == nil {
-		banner("source already cached: " + tarball)
-		return nil
+	if hasArchiveExt(tarball) {
+		if _, err := os.Stat(tarball); err == nil {
+			banner("source already cached: " + tarball)
+			return tarball, nil
+		}
 	}
 
 	banner("downloading " + url)
-	return run("wget", "-O", tarball, url)
+	tmpFile := cache + "/.download-tmp"
+	err = run("wget", "-O", tmpFile, url)
+	if err != nil {
+		os.Remove(tmpFile)
+		return "", err
+	}
+
+	if hasArchiveExt(tarball) {
+		os.Rename(tmpFile, tarball)
+		return tarball, nil
+	}
+
+	dst := detectAndRename(cache, tmpFile, name, version)
+	return dst, nil
 }
 
 func tarballName(url string) string {
-	parts := strings.Split(url, "/")
+	clean := strings.SplitN(url, "?", 2)[0]
+	parts := strings.Split(clean, "/")
 	return parts[len(parts)-1]
 }
 
-func extractSource(url, dest string) error {
-	tarball := cachedir() + "/" + tarballName(url)
-
-	err := os.MkdirAll(dest, 0755)
-	if err != nil {
-		return err
+func hasArchiveExt(name string) bool {
+	for _, ext := range []string{".tar.xz", ".txz", ".tar.gz", ".tgz", ".tar.bz2", ".tar.zst", ".zip", ".deb", ".run"} {
+		if strings.HasSuffix(name, ext) {
+			return true
+		}
 	}
-
-	banner("extracting " + tarball)
-
-	if strings.HasSuffix(tarball, ".tar.xz") || strings.HasSuffix(tarball, ".txz") {
-		return run("tar", "-xf", tarball, "-C", dest)
-	}
-	if strings.HasSuffix(tarball, ".tar.gz") || strings.HasSuffix(tarball, ".tgz") {
-		return run("tar", "-xzf", tarball, "-C", dest)
-	}
-	if strings.HasSuffix(tarball, ".tar.bz2") {
-		return run("tar", "-xjf", tarball, "-C", dest)
-	}
-	if strings.HasSuffix(tarball, ".tar.zst") {
-		return run("tar", "--zstd", "-xf", tarball, "-C", dest)
-	}
-	return fmt.Errorf("unknown archive format: %s", tarball)
+	return false
 }
 
-func hasScript(dir, name string) bool {
-	info, err := os.Stat(dir + "/" + name)
-	return err == nil && !info.IsDir()
+func detectFileType(path string) string {
+	out, err := exec.Command("file", "-b", "--extension", path).Output()
+	if err != nil {
+		return ""
+	}
+	s := strings.TrimSpace(string(out))
+	for _, t := range []struct {
+		magic  string
+		suffix string
+	}{
+		{"xz", ".tar.xz"},
+		{"gzip", ".tar.gz"},
+		{"bzip2", ".tar.bz2"},
+		{"zstd", ".tar.zst"},
+		{"zip", ".zip"},
+		{"deb", ".deb"},
+		{"executable", ".run"},
+	} {
+		if strings.Contains(s, t.magic) {
+			return t.suffix
+		}
+	}
+	return ""
+}
+
+func detectAndRename(cache, tmpFile, name, version string) string {
+	ext := detectFileType(tmpFile)
+	if ext == "" {
+		ext = ".tar.gz"
+	}
+	final := name + "-" + version + ext
+	dst := cache + "/" + final
+	os.Rename(tmpFile, dst)
+	return dst
+}
+
+func extractSource(tarball, dest string) error {
+	run("rm", "-rf", dest)
+	if err := os.MkdirAll(dest, 0755); err != nil {
+		return err
+	}
+	if _, err := os.Stat(tarball); os.IsNotExist(err) {
+		return fmt.Errorf("source not found: %s", tarball)
+	}
+	banner("extracting " + tarball)
+
+	switch {
+	case strings.HasSuffix(tarball, ".tar.xz") || strings.HasSuffix(tarball, ".txz"):
+		return run("tar", "-xf", tarball, "-C", dest)
+	case strings.HasSuffix(tarball, ".tar.gz") || strings.HasSuffix(tarball, ".tgz"):
+		return run("tar", "-xzf", tarball, "-C", dest)
+	case strings.HasSuffix(tarball, ".tar.bz2"):
+		return run("tar", "-xjf", tarball, "-C", dest)
+	case strings.HasSuffix(tarball, ".tar.zst"):
+		return run("tar", "--zstd", "-xf", tarball, "-C", dest)
+	case strings.HasSuffix(tarball, ".zip"):
+		return run("unzip", "-o", tarball, "-d", dest)
+	case strings.HasSuffix(tarball, ".deb") || strings.HasSuffix(tarball, ".run"):
+		return run("cp", tarball, dest+"/")
+	default:
+		return fmt.Errorf("unknown archive format: %s", tarball)
+	}
 }
 
 func run(name string, args ...string) error {
@@ -386,14 +503,14 @@ func run(name string, args ...string) error {
 	return cmd.Run()
 }
 
-func recordInstall(name, version, recipeDir string) error {
+func recordInstall(name, version, recipeFile string) error {
 	dbdir := sysroot() + "/.wav/db"
 	err := os.MkdirAll(dbdir, 0755)
 	if err != nil {
 		return err
 	}
 
-	entry := fmt.Sprintf("name=%s\nversion=%s\nrecipe=%s\n", name, version, recipeDir)
+	entry := fmt.Sprintf("name=%s\nversion=%s\nrecipe=%s\n", name, version, recipeFile)
 	return os.WriteFile(dbdir+"/"+name, []byte(entry), 0644)
 }
 

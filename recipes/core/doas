@@ -1,0 +1,16 @@
+name=doas
+version=6.0.1
+source=https://github.com/Duncaen/openDoas/archive/refs/tags/6.0.1.tar.gz
+depends=(openpam)
+build() {
+    cd "$WAV_SRC"
+    ./configure \
+        --prefix=/usr \
+        --sysconfdir=/etc \
+        --with-pam
+    make -j"$WAV_JOBS"
+}
+install() {
+    cd "$WAV_SRC"
+    make DESTDIR="$WAV_SYSROOT" install
+}

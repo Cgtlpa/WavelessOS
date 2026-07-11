@@ -1,2 +1,0 @@
-cd "$WAV_BUILD_DIR"/build
-make DESTDIR="$WAV_SYSROOT" install

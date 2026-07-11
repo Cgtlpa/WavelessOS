@@ -2,7 +2,7 @@
 
 WavelessOS is a minimal, source-based Linux distribution built for stability, daily driving, and gaming. It is a stripped-back system that stays out of your way and lets your hardware perform.
 
-We use **OpenRC** for a fast init system, **XFCE** as the default desktop, and **LibreWolf** for a secure, lightweight browser out of the box.
+We use a lightweight custom **init** system, **BusyBox** for core utilities, and **XFCE** as the default desktop (coming soon).
 
 The OS installs via a minimal ISO with a terminal installation script.
 
@@ -10,7 +10,7 @@ The OS installs via a minimal ISO with a terminal installation script.
 
 ## The Wave Package Manager
 
-WavelessOS features **Wave**, a custom package manager built for speed and stability. Packages are defined using simple, human-readable TOML files.
+WavelessOS features **Wave**, a custom package manager built for speed and stability. Packages are defined using simple, human-readable key=value recipe files.
 
 While WavelessOS is source-based, Wave supports **binary packages** for heavy software (like Firefox or Xorg) so you don't have to spend hours compiling massive codebases.
 
@@ -44,7 +44,7 @@ doit wave find <package>
 
 ## WUR (Wave User Repository)
 
-The **WUR** is our community-driven repository. It allows users to upload, maintain, and share their own TOML package recipes, keeping the core system microscopic while giving you access to all the software you need.
+The **WUR** is our community-driven repository. It allows users to upload, maintain, and share their own package recipes, keeping the core system microscopic while giving you access to all the software you need.
 
 ---
 

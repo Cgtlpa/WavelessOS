@@ -1,0 +1,21 @@
+name=discord
+version=0.0.67
+source=https://dl.discordapp.net/apps/linux/0.0.67/discord-0.0.67.deb
+depends=(gtk3 nss xorg-server)
+build() {
+    cd "$WAV_SRC"
+    dpkg-deb -x *.deb "$WAV_SYSROOT"
+}
+install() {
+    mkdir -p "$WAV_SYSROOT/opt" "$WAV_SYSROOT/usr/bin" "$WAV_SYSROOT/usr/share/applications"
+    cp -a "$WAV_SRC/usr/opt/Discord" "$WAV_SYSROOT/opt/discord"
+    ln -sf /opt/discord/Discord "$WAV_SYSROOT/usr/bin/discord"
+    cat > "$WAV_SYSROOT/usr/share/applications/discord.desktop" << EOF
+[Desktop Entry]
+Name=Discord
+Exec=/opt/discord/Discord
+Icon=discord
+Type=Application
+Categories=Network;InstantMessaging;
+EOF
+}

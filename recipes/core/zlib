@@ -1,0 +1,12 @@
+name=zlib
+version=1.3.2
+source=https://zlib.net/zlib-1.3.2.tar.gz
+build() {
+    cd "$WAV_SRC"
+    ./configure --prefix=/usr --static
+    make -j"$WAV_JOBS"
+}
+install() {
+    cd "$WAV_SRC"
+    make DESTDIR="$WAV_SYSROOT" install
+}
