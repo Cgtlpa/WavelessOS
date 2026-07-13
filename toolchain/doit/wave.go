@@ -8,7 +8,7 @@ import (
 
 func wave() {
 	if len(os.Args) < 3 {
-		die("usage: doit wave <acquire|build|annihilate|find|config> <package|query>")
+		die("usage: doas wave <acquire|build|annihilate|find|config> <package|query>")
 	}
 
 	action := os.Args[2]
