@@ -1,9 +1,7 @@
 #!/bin/sh
 
-# bring up loopback
 ifconfig lo 127.0.0.1 netmask 255.0.0.0 up
 
-# detect primary NIC and get DHCP lease
 for iface in $(ls /sys/class/net 2>/dev/null | grep -v lo); do
 	ip link set "$iface" up
 	udhcpc -i "$iface" -n -q -s /usr/share/udhcpc/default.script \

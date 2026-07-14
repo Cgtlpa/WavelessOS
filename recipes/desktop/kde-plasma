@@ -1,3 +1,0 @@
-name=kde-plasma
-version=6.7.1
-depends=(qt6-base qt6-wayland kwayland kwin systemsettings plasma-desktop plasma-workspace sddm)
